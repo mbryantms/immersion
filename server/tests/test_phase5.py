@@ -107,15 +107,28 @@ def test_explain_caches_by_input_hash(client, db_session, seeded, monkeypatch): 
 
     def fake_complete(prompt: str, timeout_s: int = 0):
         calls["n"] += 1
-        return {"gist": "greeting", "chunks": [{"zh": "你好", "note": "hello"}], "points": []}
+        assert "你好" in prompt  # grounded on the app's tokenization
+        return {
+            "natural": "Hello.", "literal": "hello", "structure": "greeting",
+            "words": [{"zh": "你好", "role": "greeting"}],
+            "particles": [], "pronunciation": [], "nuance": "",
+            "variations": [{"zh": "您好", "note": "formal"}],
+            "pattern": {"name": "greeting", "examples": [{"zh": "你好吗", "en": "How are you?"}]},
+            "mistakes": [],
+        }
 
     monkeypatch.setattr(provider, "available", lambda: True)
     monkeypatch.setattr(provider, "complete_json", fake_complete)
 
     first = client.post(f"/api/sentences/{seeded['sentence']}/explain")
     assert first.status_code == 200
-    assert first.json()["gist"] == "greeting"
-    assert first.json()["model"]
+    body = first.json()
+    assert body["natural"] == "Hello."
+    assert body["model"]
+    assert body["pinyin"]  # derived from analysis, not the AI
+    assert "level" in body["hsk"]
+    assert body["pattern"]["examples"][0]["py"].startswith("nǐ")  # deterministic pinyin attached
+    assert body["variations"][0]["py"]
     second = client.post(f"/api/sentences/{seeded['sentence']}/explain")
     assert second.status_code == 200
     assert calls["n"] == 1  # second hit served from ai_artifact

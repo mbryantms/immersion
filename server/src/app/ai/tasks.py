@@ -23,24 +23,99 @@ sentence, same order, no commentary.
 {numbered}"""
 
 
-EXPLAIN_PROMPT_VERSION = "1"
-EXPLAIN_PROMPT = """You are helping an intermediate Mandarin learner understand one sentence
-from something they are watching. Be concise and concrete; no praise, no filler.
+EXPLAIN_PROMPT_VERSION = "2"
+EXPLAIN_PROMPT = """You are helping an intermediate Mandarin learner deeply understand ONE
+sentence from something they are watching. Be concrete and concise; no praise,
+no filler. Facts they can see (pinyin, HSK levels, dictionary glosses) are
+supplied by the app — your job is the interpretive layer.
 
 Sentence: {zh}
+Tokenized as: {tokens}
 {en_line}
-Return ONLY JSON with this shape:
-{{"gist": "one-line natural reading of the whole sentence",
-  "chunks": [{{"zh": "chunk of the sentence", "note": "role/meaning in this sentence"}}],
-  "points": ["short grammar/usage/nuance notes worth remembering, if any"]}}
+Return ONLY JSON with this shape (omit nothing; use "" / [] when not applicable):
+{{"natural": "natural English translation",
+  "literal": "word-for-word gloss preserving Chinese order, e.g. 'he use hand twist-tight [done] loose parts'",
+  "structure": "1-3 sentences: why the sentence is ordered/built this way",
+  "words": [{{"zh": "token or adjacent-token group", "role": "grammatical role + in-context meaning, <=15 words"}}],
+  "particles": [{{"zh": "了/着/过/吧/呢/来/给/的/得/地/把/被...", "note": "why THIS particle here, what changes without it, <=20 words"}}],
+  "pronunciation": ["tone sandhi / erhua / neutral-tone reductions / connected-speech notes that apply HERE; [] if none"],
+  "nuance": "cultural or contextual nuance; \\"\\" if none",
+  "variations": [{{"zh": "same meaning, different register or region", "note": "e.g. more formal / casual / Taiwan usage"}}],
+  "pattern": {{"name": "the sentence's key grammar pattern", "examples": [{{"zh": "new example sentence using the pattern", "en": "its translation"}}]}},
+  "mistakes": ["common learner mistakes with this pattern, <=20 words each"]}}
 
-Chunks must cover the sentence in order (3-6 chunks). Keep every note under
-~15 words. Mention colloquialisms, idioms, or register only when present."""
+Rules: words[] must cover the sentence in order using ONLY the given tokens
+(adjacent tokens may be grouped; skip punctuation). particles[] covers every
+function word present. variations and pattern.examples max 2 each; mistakes
+max 3. Keep the total tight — this renders on one card."""
+
+
+def _sentence_pinyin(words: list[dict]) -> str:
+    """Display pinyin from the stored analysis: word-spaced, punctuation glued."""
+    parts: list[str] = []
+    for w in words:
+        if w.get("type") == "zh":
+            parts.append("".join(w.get("py", [])) or w["t"])
+        elif w["t"].strip():
+            if parts:
+                parts[-1] += w["t"]
+            else:
+                parts.append(w["t"])
+    return " ".join(parts)
+
+
+def _tts_pinyin(text: str) -> str:
+    """Tone-marked pinyin for AI-generated example text (deterministic)."""
+    from pypinyin import Style, pinyin as py
+
+    return " ".join(s[0] for s in py(text, style=Style.TONE))
+
+
+def _merge_breakdown(ai_words: list[dict], zh_tokens: list[dict], lex_by_id: dict) -> list[dict]:
+    """Attach app-known facts (pinyin, HSK, POS, glosses) to the AI's role
+    chunks by walking the sentence tokens the chunks were built from."""
+    out: list[dict] = []
+    i = 0
+    for chunk in ai_words:
+        text = (chunk.get("zh") or "").strip()
+        if not text:
+            continue
+        toks, acc, j = [], "", i
+        while j < len(zh_tokens) and len(acc) < len(text):
+            acc += zh_tokens[j]["t"]
+            toks.append(zh_tokens[j])
+            j += 1
+        if acc == text:
+            i = j
+        else:  # AI drifted from the given tokens: loose containment fallback
+            toks = [w for w in zh_tokens if w["t"] and w["t"] in text]
+        entry: dict = {"zh": text, "role": chunk.get("role") or chunk.get("note") or ""}
+        if toks:
+            entry["py"] = " ".join("".join(t.get("py", [])) for t in toks)
+            levels = [
+                lex_by_id[t["lex"]].hsk_level
+                for t in toks if t.get("lex") in lex_by_id and lex_by_id[t["lex"]].hsk_level
+            ]
+            if levels:
+                entry["hsk"] = max(levels)
+            if len(toks) == 1:
+                lex = lex_by_id.get(toks[0].get("lex"))
+                if lex is not None and lex.pos:
+                    entry["pos"] = lex.pos
+                gloss = toks[0].get("gloss")
+                if gloss:
+                    entry["defs"] = (gloss[0].get("defs") or [])[:2]
+        out.append(entry)
+    return out
 
 
 def explain_sentence(session: Session, sentence: Sentence) -> AiArtifact:
     """Cached AI explanation of one sentence; the cache key is the zh text, so
-    re-ingested episodes reuse explanations for unchanged sentences."""
+    re-ingested episodes reuse explanations for unchanged sentences. The AI is
+    grounded on the app's own tokenization; pinyin/HSK/POS/glosses are merged
+    in from the analysis + lexicon rather than generated."""
+    from ..models import Lexeme
+
     input_hash = hashlib.sha256(sentence.zh.encode()).hexdigest()[:16]
     cached = session.scalar(
         select(AiArtifact).where(
@@ -53,12 +128,43 @@ def explain_sentence(session: Session, sentence: Sentence) -> AiArtifact:
     if cached is not None:
         return cached
 
+    words = (sentence.analysis or {}).get("words", [])
+    zh_tokens = [w for w in words if w.get("type") == "zh"]
+    lex_ids = [w["lex"] for w in zh_tokens if w.get("lex")]
+    lex_by_id = {
+        lex.id: lex
+        for lex in session.scalars(select(Lexeme).where(Lexeme.id.in_(lex_ids)))
+    } if lex_ids else {}
+
     en_line = f"Track translation (context, may be loose): {sentence.en}\n" if sentence.en else ""
     result = provider.complete_json(
-        EXPLAIN_PROMPT.format(zh=sentence.zh, en_line=en_line), timeout_s=120
+        EXPLAIN_PROMPT.format(
+            zh=sentence.zh,
+            tokens=" | ".join(w["t"] for w in zh_tokens) or sentence.zh,
+            en_line=en_line,
+        ),
+        timeout_s=180,
     )
-    if not isinstance(result, dict) or "gist" not in result:
+    if not isinstance(result, dict) or "natural" not in result:
         raise RuntimeError(f"malformed explanation payload: {str(result)[:200]}")
+
+    result["words"] = _merge_breakdown(result.get("words") or [], zh_tokens, lex_by_id)
+    for ex in (result.get("pattern") or {}).get("examples") or []:
+        if ex.get("zh"):
+            ex["py"] = _tts_pinyin(ex["zh"])
+    for var in result.get("variations") or []:
+        if var.get("zh"):
+            var["py"] = _tts_pinyin(var["zh"])
+    result["pinyin"] = _sentence_pinyin(words)
+    levels = [lex.hsk_level for lex in lex_by_id.values() if lex.hsk_level]
+    result["hsk"] = {
+        "level": max(levels) if levels else None,
+        "offlist": [
+            lex.simplified for lex in lex_by_id.values()
+            if lex.hsk_level is None and lex.is_dict
+        ],
+    }
+
     artifact = AiArtifact(
         target_kind="sentence", target_id=sentence.id, artifact_type="explanation",
         provider="claude-cli", model=settings.ai_model,

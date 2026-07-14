@@ -24,9 +24,18 @@ export interface SentenceOut {
 }
 
 export interface ExplainResult {
-  gist: string;
-  chunks: { zh: string; note: string }[];
-  points: string[];
+  natural: string;
+  literal: string;
+  structure: string;
+  words: { zh: string; role: string; py?: string; hsk?: number; pos?: string; defs?: string[] }[];
+  particles: { zh: string; note: string }[];
+  pronunciation: string[];
+  nuance: string;
+  variations: { zh: string; py?: string; note: string }[];
+  pattern: { name: string; examples: { zh: string; py?: string; en: string }[] } | null;
+  mistakes: string[];
+  pinyin: string; // app-derived, not AI
+  hsk: { level: number | null; offlist: string[] }; // app-derived
   provider: string;
   model: string | null;
   created_at: string;
