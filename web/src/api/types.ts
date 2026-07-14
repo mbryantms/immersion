@@ -19,7 +19,17 @@ export interface SentenceOut {
   t1: number;
   en: string | null;
   conf: number | null;
+  anki?: boolean; // already exists as an Anki card
   words: Word[];
+}
+
+export interface ExplainResult {
+  gist: string;
+  chunks: { zh: string; note: string }[];
+  points: string[];
+  provider: string;
+  model: string | null;
+  created_at: string;
 }
 
 export interface SeriesSummary {
@@ -98,6 +108,7 @@ export interface ItemDetail {
   progress: { position_ms: number; completed: boolean; subtitle_mode: string | null };
   prev_item_id: number | null;
   next_item_id: number | null;
+  rewatch_nudge: boolean;
   coverage?: number;
   tokens?: number;
   unknown_lexemes?: number;

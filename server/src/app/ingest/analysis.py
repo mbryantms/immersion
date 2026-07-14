@@ -171,9 +171,41 @@ def make_thumb(video_path: Path, item_id: int, duration_ms: int | None) -> None:
     )
 
 
+def resolve_track_path(base: str | Path, item: MediaItem, track: TextTrack) -> Path | None:
+    """Filesystem path holding a track's cues. Sidecars live under the root;
+    embedded tracks live in the subs cache (re-extracted if it was wiped)."""
+    if track.source == "sidecar" and track.relpath:
+        return Path(base) / track.relpath
+    if track.source == "embedded":
+        from .embedded import extract_stream, sub_path
+
+        idx = (track.meta or {}).get("stream_index")
+        if idx is None:
+            return None
+        path = sub_path(item.id, idx)
+        if path.exists() or extract_stream(Path(base) / item.relpath, idx, path):
+            return path
+    return None
+
+
+def _pick_track(tracks: list[TextTrack], lang: str) -> TextTrack | None:
+    """Best parseable track for a language: sidecar beats embedded."""
+    rank = {"sidecar": 0, "embedded": 1}
+    candidates = [t for t in tracks if t.lang == lang and t.source in rank]
+    return min(candidates, key=lambda t: rank[t.source]) if candidates else None
+
+
+def _setting_true(session: Session, key: str) -> bool:
+    from ..models import Setting
+
+    row = session.get(Setting, key)
+    return bool(row.value) if row is not None else False
+
+
 def ingest_item(session: Session, item_id: int, progress=lambda msg: None) -> None:
     """Full text pipeline for one media item: zh track -> segments -> analysis
     -> en alignment -> thumbnail -> ready."""
+    from ..jobs import enqueue
     from ..models import MediaRoot
 
     item = session.get(MediaItem, item_id)
@@ -185,19 +217,40 @@ def ingest_item(session: Session, item_id: int, progress=lambda msg: None) -> No
     tracks = session.scalars(
         select(TextTrack).where(TextTrack.item_id == item.id, TextTrack.selected)
     ).all()
-    zh = next((t for t in tracks if t.lang == "zh"), None)
-    en = next((t for t in tracks if t.lang == "en"), None)
-    if zh is None or zh.relpath is None:
-        progress("no zh track; skipping analysis")
+    zh = _pick_track(tracks, "zh")
+    en = _pick_track(tracks, "en")
+    if (zh is None or en is None) and item.kind == "video":
+        from .embedded import ensure_embedded_tracks
+
+        ensure_embedded_tracks(session, item, base / item.relpath)
+        tracks = session.scalars(
+            select(TextTrack).where(TextTrack.item_id == item.id, TextTrack.selected)
+        ).all()
+        zh = zh or _pick_track(tracks, "zh")
+        en = en or _pick_track(tracks, "en")
+
+    zh_path = resolve_track_path(base, item, zh) if zh else None
+    if zh_path is None:
         make_thumb(base / item.relpath, item.id, item.duration_ms)
+        whisper = next((t for t in tracks if t.lang == "zh" and t.source == "whisper"), None)
+        if whisper is not None and item.ready:
+            progress("keeping whisper-generated transcript")
+        elif item.kind == "video" and _setting_true(session, "whisper_unsubbed"):
+            # low priority: subtitle ingests should never wait on GPU work
+            enqueue(session, "whisper_transcribe", {"item_id": item.id}, priority=-1)
+            progress("no zh track; queued whisper transcription")
+        else:
+            progress("no zh track; skipping analysis")
+        session.commit()
         return
 
     progress("parsing subtitles")
-    zh_cues, _ = parse_cues(base / zh.relpath, "zh")
+    zh_cues, _ = parse_cues(zh_path, "zh")
     segments = segment_cues(zh_cues)
     en_assign = None
-    if en is not None and en.relpath is not None:
-        en_cues, _ = parse_cues(base / en.relpath, "en")
+    en_path = resolve_track_path(base, item, en) if en else None
+    if en_path is not None:
+        en_cues, _ = parse_cues(en_path, "en")
         en_assign = assign_en(segments, en_cues)
 
     progress(f"analyzing {len(segments)} sentences")

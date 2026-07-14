@@ -46,5 +46,15 @@ class Settings(BaseSettings):
     def whisper_dir(self) -> Path:
         return self.cache_dir / "whisper"
 
+    @property
+    def subs_dir(self) -> Path:
+        """Embedded subtitle streams extracted from video containers."""
+        return self.cache_dir / "subs"
+
+    @property
+    def remux_dir(self) -> Path:
+        """Browser-playable mp4 remuxes; served at /media/remux/{item_id}.mp4."""
+        return self.cache_dir / "remux"
+
 
 settings = Settings()

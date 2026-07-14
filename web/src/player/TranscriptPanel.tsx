@@ -182,6 +182,14 @@ export default function TranscriptPanel({
                       {fmt(s.t0)}
                     </button>
                     <div className="min-w-0 flex-1">
+                      {s.anki && (
+                        <span
+                          title="Already a card in Anki"
+                          className="float-right ml-2 mt-1 inline-flex items-center gap-1 rounded border border-indigo-400/20 bg-indigo-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-indigo-300/80"
+                        >
+                          Anki
+                        </span>
+                      )}
                       <p
                         className={`font-zh leading-[1.8] text-stone-100 ${toneColors ? "tones" : ""}`}
                         style={{ fontSize: `${1.08 * transcriptScale}rem` }}

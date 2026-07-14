@@ -47,6 +47,15 @@ def get_audio(name: str):
     return FileResponse(target, media_type="audio/mp4")
 
 
+@router.get("/media/remux/{name}")
+def get_remux(name: str):
+    """Browser-safe mp4 cache — 'remux' is a reserved pseudo-slug like 'thumbs'."""
+    target = safe_resolve(settings.remux_dir, name)
+    if not target.is_file():
+        raise HTTPException(404)
+    return FileResponse(target, media_type="video/mp4")
+
+
 @router.get("/media/{root_slug}/{relpath:path}")
 def get_media(root_slug: str, relpath: str, session: Session = Depends(get_session)):
     root = session.scalar(select(MediaRoot).where(MediaRoot.slug == root_slug))

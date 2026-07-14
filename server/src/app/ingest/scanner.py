@@ -65,6 +65,7 @@ def scan_video_root(session: Session, root: MediaRoot, progress=lambda msg: None
             # sidecar subs can change without the video changing
             if _sync_tracks(session, root, item, path):
                 _queue_ingest(session, to_ingest, item.id)
+            _queue_extras(session, item)
             continue
 
         progress(f"probing {n + 1}/{len(files)}: {relpath}")
@@ -99,6 +100,7 @@ def scan_video_root(session: Session, root: MediaRoot, progress=lambda msg: None
             item.meta = {**(item.meta or {}), "fast_fp": fast}
             if _sync_tracks(session, root, item, path):
                 _queue_ingest(session, to_ingest, item.id)
+            _queue_extras(session, item)
             continue
 
         probe = probe_summary(path)
@@ -111,6 +113,7 @@ def scan_video_root(session: Session, root: MediaRoot, progress=lambda msg: None
         session.flush()
         _sync_tracks(session, root, item, path)
         _queue_ingest(session, to_ingest, item.id)
+        _queue_extras(session, item)
         if n % 20 == 0:
             session.commit()
 
@@ -128,6 +131,23 @@ def _queue_ingest(session: Session, to_ingest: list[int], item_id: int) -> None:
     and would otherwise never ingest them (the Bird-and-Kip bug)."""
     to_ingest.append(item_id)
     enqueue(session, "ingest_item", {"item_id": item_id})
+
+
+def _queue_extras(session: Session, item: MediaItem) -> None:
+    """Backfill work that fast-pathed (unchanged) items still need: a remux for
+    non-direct-play codecs, and an ingest retry when embedded subtitle streams
+    could supply the missing zh track. Both are meta-guarded no-ops afterwards."""
+    from .embedded import has_embedded_candidate
+    from .remux import needs_remux, remux_current
+
+    if needs_remux(item) and not remux_current(item):
+        enqueue(session, "remux_item", {"item_id": item.id})
+    if (
+        not item.ready
+        and has_embedded_candidate(item)
+        and (item.meta or {}).get("embedded_checked") != item.fingerprint
+    ):
+        enqueue(session, "ingest_item", {"item_id": item.id})
 
 
 def _sync_tracks(session: Session, root: MediaRoot, item: MediaItem, path: Path) -> bool:

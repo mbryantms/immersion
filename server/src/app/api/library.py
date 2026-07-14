@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..db import get_session
 from ..jobs import enqueue
 from ..models import (
+    Event,
     KnowledgeState,
     MediaItem,
     MediaRoot,
@@ -30,6 +32,9 @@ def stream_url(item: MediaItem, root_slug: str) -> str:
     # never the original file under the root
     if item.kind == "audio":
         return f"/media/audio/{item.id}.m4a"
+    # non-direct-play video streams its cached remux once the fp matches
+    if ((item.meta or {}).get("remux") or {}).get("fp") == item.fingerprint:
+        return f"/media/remux/{item.id}.mp4"
     return f"/media/{root_slug}/{quote(item.relpath)}"
 
 
@@ -215,6 +220,20 @@ def get_item(item_id: int, session: Session = Depends(get_session)):
         ).all()
     ids = [s.id for s in siblings]
     pos = ids.index(item_id) if item_id in ids else -1
+
+    # captions-off rewatch nudge: mastered content, watched through, and barely
+    # any recent dictionary reliance — suggest rewatching without subtitles
+    coverage = cov.get(item_id, {}).get("coverage", 0)
+    rewatch_nudge = False
+    if item.ready and progress is not None and progress.completed and coverage >= 0.95:
+        recent_lookups = session.scalar(
+            select(func.count()).select_from(Event).where(
+                Event.type == "lookup", Event.item_id == item_id,
+                Event.ts >= datetime.now(timezone.utc) - timedelta(days=14),
+            )
+        )
+        rewatch_nudge = (recent_lookups or 0) < 5
+
     return {
         "id": item.id, "title": item.title, "kind": item.kind, "ordinal": item.ordinal,
         "duration_ms": item.duration_ms, "ready": item.ready, "available": item.available,
@@ -235,5 +254,33 @@ def get_item(item_id: int, session: Session = Depends(get_session)):
         },
         "prev_item_id": ids[pos - 1] if pos > 0 else None,
         "next_item_id": ids[pos + 1] if 0 <= pos < len(ids) - 1 else None,
+        "rewatch_nudge": rewatch_nudge,
         **cov.get(item_id, {}),
     }
+
+
+class TrackPatch(BaseModel):
+    offset_ms: int
+
+
+@router.patch("/tracks/{track_id}")
+def patch_track(track_id: int, body: TrackPatch, session: Session = Depends(get_session)):
+    """Per-track sync nudge; applied to sentence times in the sentences payload."""
+    track = session.get(TextTrack, track_id)
+    if track is None:
+        raise HTTPException(404)
+    track.offset_ms = max(-30_000, min(30_000, body.offset_ms))
+    session.commit()
+    return {"id": track.id, "offset_ms": track.offset_ms}
+
+
+@router.post("/items/{item_id}/transcribe")
+def transcribe_item(item_id: int, session: Session = Depends(get_session)):
+    """Queue whisper transcript generation for an unsubbed video."""
+    item = session.get(MediaItem, item_id)
+    if item is None:
+        raise HTTPException(404)
+    if item.kind != "video":
+        raise HTTPException(400, "podcasts align via their transcript")
+    job = enqueue(session, "whisper_transcribe", {"item_id": item_id})
+    return {"queued": job is not None}

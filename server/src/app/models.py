@@ -88,6 +88,7 @@ class TextTrack(Base):
     offset_ms: Mapped[int] = mapped_column(Integer, default=0)
     selected: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    meta: Mapped[dict | None] = mapped_column(JSON)  # embedded: {stream_index}
     item: Mapped[MediaItem] = relationship(back_populates="tracks")
 
 
@@ -264,6 +265,19 @@ class AnkiLink(Base):
     fields_hash: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="exported")
     exported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AnkiSentence(Base):
+    """Sentences that already exist as Anki cards (read-synced from a
+    user-configured deck query). zh_norm is whitespace/HTML-stripped text —
+    the match key against sentence.zh."""
+
+    __tablename__ = "anki_sentence"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    note_id: Mapped[int] = mapped_column(Integer)
+    deck: Mapped[str | None] = mapped_column(String)
+    zh_norm: Mapped[str] = mapped_column(Text, unique=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AiArtifact(Base):

@@ -1,17 +1,37 @@
-import { BookOpenText, Captions, Gauge, Palette, RotateCcw, Type } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { BookOpenText, Captions, Cpu, Gauge, Palette, RotateCcw, Type } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { Page, PageHeader } from "@/components/layout/Page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { get } from "../api/client";
+import { get, put } from "../api/client";
 import { formatPinyin } from "../lib/pinyin";
 import { ZH_FONTS, usePrefs, type PinyinStyle, type SubtitleMode } from "../lib/prefs";
+
+interface ServerSettings {
+  whisper_unsubbed?: boolean;
+  anki_sentence_search?: { query?: string; field?: string };
+  [key: string]: unknown;
+}
+
+/** Server-side app settings (worker behavior) — distinct from the local
+ *  display prefs handled by usePrefs. */
+function useServerSettings() {
+  const qc = useQueryClient();
+  const query = useQuery({ queryKey: ["server-settings"], queryFn: () => get<ServerSettings>("/settings") });
+  const mutation = useMutation({
+    mutationFn: (patch: ServerSettings) => put("/settings", patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["server-settings"] }),
+  });
+  return { settings: query.data, save: mutation.mutate };
+}
 
 interface DictionariesInfo {
   dictionaries: { name: string; entries: number; source: string }[];
@@ -22,6 +42,13 @@ interface DictionariesInfo {
 export default function SettingsPage() {
   const prefs = usePrefs();
   const { data: dictionaries } = useQuery({ queryKey: ["dictionaries"], queryFn: () => get<DictionariesInfo>("/dictionaries") });
+  const { settings: server, save: saveServer } = useServerSettings();
+  const [ankiQuery, setAnkiQuery] = useState("");
+  const [ankiField, setAnkiField] = useState("");
+  useEffect(() => {
+    setAnkiQuery(server?.anki_sentence_search?.query ?? "");
+    setAnkiField(server?.anki_sentence_search?.field ?? "");
+  }, [server]);
 
   const reset = () => prefs.set({ subtitleMode: "zh", toneColors: true, traditional: false, pinyin: false, pinyinStyle: "marks", zhFont: "sans", pauseAfter: false, pauseAfterDelayMs: 0, prerollMs: 300, rate: 1, fontScale: 1, transcriptFontScale: 1 });
 
@@ -62,6 +89,29 @@ export default function SettingsPage() {
               <SettingRow label="Pause after sentences" hint="Create retrieval time before the next line"><Switch checked={prefs.pauseAfter} onCheckedChange={(checked) => prefs.set({ pauseAfter: checked })} /></SettingRow>
               {prefs.pauseAfter && <SettingRow label="Resume behavior" hint="Wait for input or continue automatically"><Select value={String(prefs.pauseAfterDelayMs)} onValueChange={(value) => prefs.set({ pauseAfterDelayMs: Number(value) })}><SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="0">Wait for me</SelectItem><SelectItem value="1000">After 1 second</SelectItem><SelectItem value="2000">After 2 seconds</SelectItem><SelectItem value="3000">After 3 seconds</SelectItem></SelectContent></Select></SettingRow>}
               <SettingRow label="Sentence pre-roll" hint="Start slightly before a selected sentence"><Select value={String(prefs.prerollMs)} onValueChange={(value) => prefs.set({ prerollMs: Number(value) })}><SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="0">None</SelectItem><SelectItem value="300">300 ms</SelectItem><SelectItem value="500">500 ms</SelectItem><SelectItem value="800">800 ms</SelectItem></SelectContent></Select></SettingRow>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><div className="flex items-center gap-2"><Cpu className="size-4 text-primary" /><CardTitle className="text-base">Ingest &amp; sync</CardTitle></div><CardDescription>Worker behavior — these run on the server, not in this browser</CardDescription></CardHeader>
+            <CardContent className="space-y-0 pt-2">
+              <SettingRow label="Auto-transcribe unsubbed video" hint="Whisper generates a Chinese track when a video has no subtitles (GPU-minutes per episode; queued behind other work)">
+                <Switch checked={!!server?.whisper_unsubbed} onCheckedChange={(checked) => saveServer({ whisper_unsubbed: checked })} />
+              </SettingRow>
+              <SettingRow label="Anki sentence badges" hint="Note search + field holding the Chinese sentence; matched lines show an Anki badge in transcripts. Applied on the nightly Anki read-sync.">
+                <div className="flex w-full flex-col gap-2 sm:w-64">
+                  <Input placeholder='deck:"Little Fox Chinese"' value={ankiQuery} onChange={(e) => setAnkiQuery(e.target.value)} aria-label="Anki note search" />
+                  <Input placeholder="Simplified" value={ankiField} onChange={(e) => setAnkiField(e.target.value)} aria-label="Sentence field name" />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={(server?.anki_sentence_search?.query ?? "") === ankiQuery && (server?.anki_sentence_search?.field ?? "") === ankiField}
+                    onClick={() => saveServer({ anki_sentence_search: ankiQuery && ankiField ? { query: ankiQuery, field: ankiField } : {} })}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </SettingRow>
             </CardContent>
           </Card>
         </div>

@@ -63,6 +63,20 @@ def whisper_align(session: Session, payload: dict, progress) -> dict:
     return whisper_align_item(session, payload["item_id"], progress)
 
 
+@handler("whisper_transcribe")
+def whisper_transcribe(session: Session, payload: dict, progress) -> dict:
+    from ..ingest.transcribe import whisper_transcribe_item
+
+    return whisper_transcribe_item(session, payload["item_id"], progress)
+
+
+@handler("remux_item")
+def remux_item_handler(session: Session, payload: dict, progress) -> dict:
+    from ..ingest.remux import remux_item
+
+    return remux_item(session, payload["item_id"], progress)
+
+
 @handler("translate_item")
 def translate_item_handler(session: Session, payload: dict, progress) -> dict:
     from ..ai.tasks import translate_item

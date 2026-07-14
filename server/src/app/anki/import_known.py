@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from ..models import KnowledgeState, Setting
+from ..lingua.convert import zh_norm
+from ..models import AnkiSentence, KnowledgeState, Setting
 from .connect import ac
 
 DEFAULT_QUERY = '"note:Xiehanzi Mandarin"'
@@ -74,6 +75,8 @@ def import_known(
         else:
             counts["unchanged"] += 1
 
+    counts["sentence_cards"] = import_sentence_cards(session, progress)
+
     session.merge(Setting(key="anki_last_import", value={
         "at": now.isoformat(), "query": query, "mature_days": mature_days,
         "counts": counts, "words": len(best),
@@ -81,3 +84,35 @@ def import_known(
     session.commit()
     progress(json.dumps(counts))
     return counts
+
+
+def import_sentence_cards(session: Session, progress=lambda msg: None) -> int:
+    """Refresh anki_sentence (the already-in-Anki badge source) from a
+    user-configured note search, e.g. the LFC sentence decks. Setting
+    `anki_sentence_search` = {"query": 'deck:"Little Fox Chinese"', "field":
+    "Simplified"}; unset means the feature is off. The table is a derived
+    cache, so each import replaces it wholesale."""
+    cfg = session.get(Setting, "anki_sentence_search")
+    query = ((cfg.value or {}) if cfg else {}).get("query")
+    field = ((cfg.value or {}) if cfg else {}).get("field")
+    if not query or not field:
+        return 0
+
+    note_ids = ac("findNotes", query=query)
+    progress(f"{len(note_ids)} sentence notes matched {query}")
+    rows: dict[str, dict] = {}
+    for i in range(0, len(note_ids), 500):
+        for info in ac("notesInfo", notes=note_ids[i : i + 500]):
+            value = (info.get("fields", {}).get(field) or {}).get("value", "")
+            norm = zh_norm(value)
+            if norm:
+                rows[norm] = {"note_id": info["noteId"], "zh_norm": norm}
+
+    session.execute(delete(AnkiSentence))
+    now = datetime.now(timezone.utc)
+    session.add_all(
+        AnkiSentence(note_id=r["note_id"], zh_norm=r["zh_norm"], imported_at=now)
+        for r in rows.values()
+    )
+    session.commit()
+    return len(rows)

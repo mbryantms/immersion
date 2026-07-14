@@ -220,6 +220,15 @@ export const clearKnowledge = (lexemeId: number) =>
 export const resetLexemeStats = (lexemeId: number) =>
   del<{ lexeme_id: number; reset: boolean }>(`/lexemes/${lexemeId}/stats`);
 
+export const explainSentence = (sentenceId: number) =>
+  post<import("./types").ExplainResult>(`/sentences/${sentenceId}/explain`);
+
+export const patchTrackOffset = (trackId: number, offsetMs: number) =>
+  patch<{ id: number; offset_ms: number }>(`/tracks/${trackId}`, { offset_ms: offsetMs });
+
+export const queueTranscribe = (itemId: number) =>
+  post<{ queued: boolean }>(`/items/${itemId}/transcribe`);
+
 export const saveProgress = (
   itemId: number,
   body: { position_ms: number; duration_ms?: number; completed?: boolean; subtitle_mode?: string },

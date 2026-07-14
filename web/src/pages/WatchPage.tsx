@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -7,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { post } from "../api/client";
 import {
+  patchTrackOffset,
+  queueTranscribe,
   saveProgress,
   useItem,
   useKnowledge,
@@ -21,6 +24,8 @@ import { cycleSubtitleMode, usePrefs } from "../lib/prefs";
 import AudioSurface from "../player/AudioSurface";
 import Controls, { nextRate } from "../player/Controls";
 import DictationPanel from "../player/DictationPanel";
+import ExplainSheet from "../player/ExplainSheet";
+import SessionSummary, { type SessionLookup } from "../player/SessionSummary";
 import SubtitleOverlay from "../player/SubtitleOverlay";
 import TranscriptPanel from "../player/TranscriptPanel";
 import { useKeyboard } from "../player/useKeyboard";
@@ -41,12 +46,21 @@ export default function WatchPage() {
 
   const isAudio = item?.kind === "audio";
   const prefs = usePrefs();
+  const qc = useQueryClient();
   const [loop, setLoop] = useState(false);
   const [dictation, setDictation] = useState(false);
   const [gloss, setGloss] = useState<GlossTarget | null>(null);
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
   const [enRevealed, setEnRevealed] = useState<Set<number>>(new Set());
   const [pyRevealed, setPyRevealed] = useState<Set<string>>(new Set());
+  const [explainFor, setExplainFor] = useState<SentenceOut | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [nudgeHidden, setNudgeHidden] = useState(true);
+  const [transcribeQueued, setTranscribeQueued] = useState(false);
+  const sessionLookups = useRef<Map<number, SessionLookup>>(new Map());
+  const playedSeconds = useRef(0);
+  const subOffsetRef = useRef<number | null>(null); // local echo until refetch
+  const [subOffset, setSubOffset] = useState<number | null>(null);
 
   const { idx, visible, autoPaused, resume, armSentence, syncToTime } = useSentenceClock(videoRef, sentences, {
     pauseAfter: prefs.pauseAfter,
@@ -66,6 +80,47 @@ export default function WatchPage() {
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, []);
+
+  // per-item session state
+  useEffect(() => {
+    setNudgeHidden(localStorage.getItem(`rewatch-nudge-${id}`) === "1");
+    setTranscribeQueued(false);
+    sessionLookups.current = new Map();
+    playedSeconds.current = 0;
+    subOffsetRef.current = null;
+    setSubOffset(null);
+  }, [id]);
+
+  // reaching the end of the episode is the natural recap moment
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return;
+    const onEnded = () => {
+      flush();
+      setSummaryOpen(true);
+    };
+    media.addEventListener("ended", onEnded);
+    return () => media.removeEventListener("ended", onEnded);
+  }, [item, isAudio]);
+
+  // ---- subtitle sync offset (,/. keys) -------------------------------------
+  const zhTrack = item?.tracks.find((t) => t.lang === "zh" && t.selected);
+  const shownOffset = subOffset ?? zhTrack?.offset_ms ?? 0;
+  const nudgeSubs = useCallback(
+    (delta: number) => {
+      if (!zhTrack) return;
+      const next = Math.max(-30_000, Math.min(30_000, (subOffsetRef.current ?? zhTrack.offset_ms) + delta));
+      subOffsetRef.current = next;
+      setSubOffset(next);
+      patchTrackOffset(zhTrack.id, next)
+        .then(() => {
+          qc.invalidateQueries({ queryKey: ["sentences", id] });
+          qc.invalidateQueries({ queryKey: ["item", id] });
+        })
+        .catch(() => {});
+    },
+    [zhTrack, id, qc],
+  );
 
   // ---- resume + progress persistence -------------------------------------
   const [searchParams] = useSearchParams();
@@ -91,6 +146,7 @@ export default function WatchPage() {
     const iv = setInterval(() => {
       const v = videoRef.current;
       if (v && !v.paused) {
+        playedSeconds.current += 5;
         saveProgress(id, {
           position_ms: Math.round(v.currentTime * 1000),
           duration_ms: Math.round((v.duration || 0) * 1000),
@@ -135,6 +191,14 @@ export default function WatchPage() {
     (sentence: SentenceOut, word: Word) => {
       if (word.type !== "zh") return;
       videoRef.current?.pause();
+      if (word.lex && !sessionLookups.current.has(word.lex)) {
+        sessionLookups.current.set(word.lex, {
+          lexemeId: word.lex,
+          surface: word.t,
+          pinyin: word.py?.join(" "),
+          sentenceId: sentence.id,
+        });
+      }
       setGloss({ sentence, word });
     },
     [],
@@ -262,6 +326,8 @@ export default function WatchPage() {
       if (next) setLoop(false);
       prefs.set({ pauseAfter: next });
     },
+    ",": () => nudgeSubs(-250),
+    ".": () => nudgeSubs(250),
     Escape: closeGloss,
   }, gloss ? [" ", "Escape"] : ["Escape"]);
 
@@ -340,6 +406,60 @@ export default function WatchPage() {
             </div>
           </div>
         </header>
+
+        {item.rewatch_nudge && !nudgeHidden && (
+          <div className="mb-3 flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-teal-400/15 bg-teal-400/6 px-4 py-2.5 text-sm text-teal-100">
+            <span>
+              You know {Math.round((item.coverage ?? 0) * 100)}% of this episode — try a rewatch with
+              captions off and let your ears do the work.
+            </span>
+            <span className="grow" />
+            <Button
+              size="xs"
+              variant="secondary"
+              className="border border-teal-400/20 bg-teal-400/10 text-teal-200 hover:bg-teal-400/20"
+              onClick={() => {
+                prefs.set({ subtitleMode: "off" });
+                localStorage.setItem(`rewatch-nudge-${id}`, "1");
+                setNudgeHidden(true);
+                track("rewatch_nudge_accept", { item_id: id });
+              }}
+            >
+              Captions off
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="text-teal-300/60"
+              onClick={() => {
+                localStorage.setItem(`rewatch-nudge-${id}`, "1");
+                setNudgeHidden(true);
+              }}
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
+
+        {!isAudio && item.available && !item.ready && item.n_sentences === 0 && (
+          <div className="mb-3 flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-amber-400/15 bg-amber-400/5 px-4 py-2.5 text-sm text-amber-100">
+            <span>No Chinese subtitles were found for this video.</span>
+            <span className="grow" />
+            <Button
+              size="xs"
+              variant="secondary"
+              disabled={transcribeQueued}
+              className="border border-amber-400/20 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20"
+              onClick={() => {
+                queueTranscribe(id)
+                  .then(() => setTranscribeQueued(true))
+                  .catch(() => {});
+              }}
+            >
+              {transcribeQueued ? "Queued — check back soon" : "Generate transcript (Whisper)"}
+            </Button>
+          </div>
+        )}
 
         <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_410px]">
           <main className="flex min-h-0 min-w-0 flex-col gap-3">
@@ -481,7 +601,45 @@ export default function WatchPage() {
                   <BookmarkIcon /> Save sentence
                 </Button>
               )}
+              {current && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    videoRef.current?.pause();
+                    setExplainFor(current);
+                    track("explain", { item_id: id, sentence_id: current.id });
+                  }}
+                  className="text-muted-foreground hover:text-teal-300"
+                  title="AI explanation of the current sentence"
+                >
+                  <SparkleIcon /> Explain
+                </Button>
+              )}
+              {shownOffset !== 0 && (
+                <Badge
+                  variant="secondary"
+                  className="cursor-pointer tabular-nums text-[10px] text-muted-foreground"
+                  onClick={() => nudgeSubs(-shownOffset)}
+                  title="Subtitle sync offset — click to reset"
+                >
+                  subs {shownOffset > 0 ? "+" : ""}{(shownOffset / 1000).toFixed(2)}s
+                </Badge>
+              )}
               <span className="grow" />
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => {
+                  videoRef.current?.pause();
+                  flush();
+                  setSummaryOpen(true);
+                }}
+                className="text-muted-foreground"
+                title="Review this session's lookups"
+              >
+                End session
+              </Button>
               <details className="shortcut-help relative">
                 <summary className="cursor-pointer list-none rounded-md px-2 py-1 transition hover:bg-white/5 hover:text-stone-300">Keyboard shortcuts</summary>
                 <div className="absolute bottom-8 right-0 z-30 grid w-72 grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-white/10 bg-[#18201d] p-3 text-xs text-stone-400 shadow-2xl">
@@ -495,6 +653,7 @@ export default function WatchPage() {
                   <Shortcut keys="D" label="Define" />
                   <Shortcut keys="A" label="Save sentence" />
                   <Shortcut keys="M" label="Auto-pause" />
+                  <Shortcut keys=", ." label="Subtitle sync" />
                 </div>
               </details>
             </div>
@@ -534,6 +693,30 @@ export default function WatchPage() {
           </aside>
         </div>
       </div>
+
+      {explainFor && <ExplainSheet sentence={explainFor} onClose={() => setExplainFor(null)} />}
+
+      {summaryOpen && (
+        <SessionSummary
+          lookups={[...sessionLookups.current.values()]}
+          minutes={playedSeconds.current / 60}
+          knowledge={knowledge}
+          savedLexemes={savedLexemes}
+          onSave={(selected) => {
+            selected.forEach((lookup) =>
+              saveItem.mutate({
+                kind: "word",
+                lexeme_id: lookup.lexemeId,
+                surface: lookup.surface,
+                sentence_id: lookup.sentenceId,
+              }),
+            );
+            selected.forEach((lookup) => track("save", { item_id: id, sentence_id: lookup.sentenceId, lexeme_id: lookup.lexemeId }));
+            setSummaryOpen(false);
+          }}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
 
       {gloss && createPortal(
         <GlossSheet
@@ -592,6 +775,10 @@ function TranslationIcon() {
 
 function BookmarkIcon() {
   return <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" className="size-3.5" aria-hidden="true"><path d="M5 2.5h8v13l-4-2.7L5 15.5v-13Z" /></svg>;
+}
+
+function SparkleIcon() {
+  return <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" className="size-3.5" aria-hidden="true"><path d="M9 2.5 10.6 7 15 8.5 10.6 10 9 14.5 7.4 10 3 8.5 7.4 7 9 2.5ZM14.5 13l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6.6-1.7Z" /></svg>;
 }
 
 function Shortcut({ keys, label }: { keys: string; label: string }) {

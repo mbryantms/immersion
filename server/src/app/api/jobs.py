@@ -14,7 +14,8 @@ from ..models import Job
 router = APIRouter()
 
 ALLOWED = {"scan_all", "scan_root", "ingest_item", "anki_import_known",
-           "whisper_align", "translate_item", "anki_export", "fts_backfill"}
+           "whisper_align", "whisper_transcribe", "remux_item",
+           "translate_item", "anki_export", "fts_backfill"}
 
 
 class JobIn(BaseModel):

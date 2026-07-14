@@ -32,6 +32,14 @@ def t2s(text: str) -> str:
     return _cc_t2s().convert(text)
 
 
+def zh_norm(text: str) -> str:
+    """Match key for comparing sentence text across sources (app sentences vs
+    Anki card fields): HTML tags and all whitespace stripped."""
+    import re
+
+    return re.sub(r"<[^>]+>|\s+|&nbsp;", "", text)
+
+
 def sentence_traditional(zh: str, token_spans: list[tuple[int, int]]) -> tuple[str, list[str]]:
     """(full traditional sentence, per-token traditional surfaces)."""
     trad = s2t(zh)

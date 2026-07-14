@@ -23,6 +23,53 @@ sentence, same order, no commentary.
 {numbered}"""
 
 
+EXPLAIN_PROMPT_VERSION = "1"
+EXPLAIN_PROMPT = """You are helping an intermediate Mandarin learner understand one sentence
+from something they are watching. Be concise and concrete; no praise, no filler.
+
+Sentence: {zh}
+{en_line}
+Return ONLY JSON with this shape:
+{{"gist": "one-line natural reading of the whole sentence",
+  "chunks": [{{"zh": "chunk of the sentence", "note": "role/meaning in this sentence"}}],
+  "points": ["short grammar/usage/nuance notes worth remembering, if any"]}}
+
+Chunks must cover the sentence in order (3-6 chunks). Keep every note under
+~15 words. Mention colloquialisms, idioms, or register only when present."""
+
+
+def explain_sentence(session: Session, sentence: Sentence) -> AiArtifact:
+    """Cached AI explanation of one sentence; the cache key is the zh text, so
+    re-ingested episodes reuse explanations for unchanged sentences."""
+    input_hash = hashlib.sha256(sentence.zh.encode()).hexdigest()[:16]
+    cached = session.scalar(
+        select(AiArtifact).where(
+            AiArtifact.target_kind == "sentence",
+            AiArtifact.artifact_type == "explanation",
+            AiArtifact.input_hash == input_hash,
+            AiArtifact.prompt_version == EXPLAIN_PROMPT_VERSION,
+        )
+    )
+    if cached is not None:
+        return cached
+
+    en_line = f"Track translation (context, may be loose): {sentence.en}\n" if sentence.en else ""
+    result = provider.complete_json(
+        EXPLAIN_PROMPT.format(zh=sentence.zh, en_line=en_line), timeout_s=120
+    )
+    if not isinstance(result, dict) or "gist" not in result:
+        raise RuntimeError(f"malformed explanation payload: {str(result)[:200]}")
+    artifact = AiArtifact(
+        target_kind="sentence", target_id=sentence.id, artifact_type="explanation",
+        provider="claude-cli", model=settings.ai_model,
+        prompt_version=EXPLAIN_PROMPT_VERSION, input_hash=input_hash,
+        output=result,
+    )
+    session.add(artifact)
+    session.commit()
+    return artifact
+
+
 def translate_item(session: Session, item_id: int, progress=lambda msg: None) -> dict:
     item = session.get(MediaItem, item_id)
     if item is None:

@@ -12,7 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
+from ..lingua.convert import zh_norm
 from ..models import (
+    AnkiSentence,
     KnowledgeState,
     Lexeme,
     LexemeStats,
@@ -20,9 +22,23 @@ from ..models import (
     SavedItem,
     Sense,
     Sentence,
+    TextTrack,
 )
 
 router = APIRouter()
+
+
+def _anki_matches(session: Session, rows: list[Sentence]) -> set[int]:
+    """Sentence ids that already exist as Anki cards (matched on normalized zh)."""
+    norm_to_id = {zh_norm(s.zh): s.id for s in rows}
+    keys = list(norm_to_id)
+    hits: set[int] = set()
+    for i in range(0, len(keys), 900):
+        for (norm,) in session.execute(
+            select(AnkiSentence.zh_norm).where(AnkiSentence.zh_norm.in_(keys[i : i + 900]))
+        ):
+            hits.add(norm_to_id[norm])
+    return hits
 
 
 @router.get("/items/{item_id}/sentences")
@@ -32,16 +48,45 @@ def get_sentences(item_id: int, session: Session = Depends(get_session)):
     rows = session.scalars(
         select(Sentence).where(Sentence.item_id == item_id).order_by(Sentence.ordinal)
     ).all()
+    # user-set per-track sync nudge shifts display timing; cue times stay pristine
+    offsets = dict(session.execute(
+        select(TextTrack.id, TextTrack.offset_ms).where(TextTrack.item_id == item_id)
+    ).all())
+    in_anki = _anki_matches(session, rows)
     return {
         "item_id": item_id,
         "sentences": [
             {
                 "id": s.id, "ord": s.ordinal, "zh": s.zh, "tr": s.trad,
-                "t0": s.t0_ms, "t1": s.t1_ms, "en": s.en, "conf": s.align_conf,
+                "t0": max(0, s.t0_ms + offsets.get(s.track_id, 0)),
+                "t1": max(0, s.t1_ms + offsets.get(s.track_id, 0)),
+                "en": s.en, "conf": s.align_conf,
+                "anki": s.id in in_anki or None,
                 "words": (s.analysis or {}).get("words", []),
             }
             for s in rows
         ],
+    }
+
+
+@router.post("/sentences/{sentence_id}/explain")
+def explain(sentence_id: int, session: Session = Depends(get_session)):
+    """AI explanation (cached per zh text + prompt version). Runs the provider
+    synchronously — seconds, not the job queue; provenance travels with it."""
+    from ..ai import provider
+    from ..ai.tasks import explain_sentence
+
+    sentence = session.get(Sentence, sentence_id)
+    if sentence is None:
+        raise HTTPException(404)
+    if not provider.available():
+        raise HTTPException(503, "AI provider unavailable (claude CLI not on PATH)")
+    artifact = explain_sentence(session, sentence)
+    return {
+        **artifact.output,
+        "provider": artifact.provider,
+        "model": artifact.model,
+        "created_at": artifact.created_at,
     }
 
 
