@@ -1,0 +1,12 @@
+[Unit]
+Description=Immersion worker (scans, subtitle analysis, Anki sync)
+After=network.target
+
+[Service]
+WorkingDirectory=%h/dev/immersion/server
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/.local/bin/uv run immersion worker
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

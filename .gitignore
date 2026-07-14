@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+web/dist/
+*.tsbuildinfo
+.env
+*.log
+.playwright-mcp/
+# debug screenshots dropped in the repo root during dev sessions
+/*.png

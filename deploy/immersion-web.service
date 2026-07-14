@@ -1,0 +1,10 @@
+[Unit]
+Description=Immersion web (caddy: SPA + media + API proxy on :8736)
+After=network.target
+
+[Service]
+ExecStart=%h/.local/bin/caddy run --config %h/dev/immersion/deploy/Caddyfile --adapter caddyfile
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

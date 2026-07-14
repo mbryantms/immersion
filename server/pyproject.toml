@@ -1,0 +1,60 @@
+[project]
+name = "immersion"
+version = "0.1.0"
+description = "Self-hosted Mandarin immersion app: local video + podcasts with interactive subtitles, shared learner model, Anki bridge"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pydantic-settings>=2.4",
+    "pysubs2>=1.7",
+    "pypinyin>=0.53.0",
+    "hanlp>=2.1.3",
+    "torch>=2.4",
+    "transformers>=4.40,<5",
+    "opencc>=1.1",
+    "xxhash>=3.4",
+    "charset-normalizer>=3.3",
+    "httpx>=0.27",
+    "faster-whisper>=1.1.0",
+    "nvidia-cudnn-cu12>=9",
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "edge-tts>=7.2.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+immersion = "app.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+# torch is only used by HanLP's tokenizer, which runs in the worker on CPU;
+# the CPU wheel keeps the venv ~5GB smaller. (Whisper arrives in Phase 2 via
+# ctranslate2, not torch.)
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: needs model downloads (HanLP)"]

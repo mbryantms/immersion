@@ -1,0 +1,44 @@
+# Immersion — served on the tailnet at :8736.
+# /api -> FastAPI; /media/* served by Caddy directly (Range/sendfile);
+# everything else is the SPA.
+
+:8736 {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8770
+	}
+
+	handle_path /media/thumbs/* {
+		root * /home/matthew/.local/share/immersion/cache/thumbs
+		file_server
+		header Cache-Control "public, max-age=604800"
+	}
+
+	# podcast m4a cache (ingest-transcoded; filename = <item_id>.m4a)
+	handle_path /media/audio/* {
+		root * /home/matthew/.local/share/immersion/cache/audio
+		file_server
+		header Cache-Control "public, max-age=604800"
+	}
+
+	# one handle_path per media root, path prefix = root slug
+	handle_path /media/lfc/* {
+		root * /mnt/lfc
+		file_server
+		header Cache-Control "public, max-age=604800"
+	}
+
+	handle {
+		root * /home/matthew/dev/immersion/web/dist
+		try_files {path} /index.html
+		file_server
+		# hashed by vite -> safe to cache forever; everything else is an SPA
+		# navigation that serves index.html (header matches the pre-rewrite
+		# path, so matching /index.html directly would never fire on "/")
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@notassets not path /assets/*
+		header @notassets Cache-Control "no-cache"
+	}
+}

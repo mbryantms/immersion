@@ -1,0 +1,9 @@
+[Unit]
+Description=Immersion: periodic library scan
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target
