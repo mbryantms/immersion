@@ -45,6 +45,7 @@ function localInfo(word: Word, knowledge: Record<string, KnowledgeStateName>): L
 const stateLabel: Record<KnowledgeStateName, string> = {
   new: "New",
   learning: "Learning",
+  familiar: "Familiar",
   known: "Known",
   ignored: "Ignored",
 };
@@ -52,6 +53,7 @@ const stateLabel: Record<KnowledgeStateName, string> = {
 const stateDot: Record<KnowledgeStateName, string> = {
   new: "bg-sky-400",
   learning: "bg-amber-400",
+  familiar: "bg-teal-400",
   known: "bg-emerald-400",
   ignored: "bg-stone-500",
 };

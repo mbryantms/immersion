@@ -80,6 +80,14 @@ def post_events(events: list[EventIn], session: Session = Depends(get_session)):
         inserted += 1
         if ev.type == "lookup" and ev.lexeme_id:
             session.execute(_BUMP_LOOKUP, {"lex": ev.lexeme_id, "now": now.isoformat()})
+            # a lookup contradicts derived familiarity: demote immediately.
+            # This self-correction is what makes passive promotion safe.
+            from ..models import KnowledgeState
+
+            ks = session.get(KnowledgeState, ev.lexeme_id)
+            if ks is not None and ks.source == "derived" and ks.state in ("familiar", "known"):
+                ks.state = "learning"
+                ks.updated_at = now
         elif ev.type == "sentence_played" and ev.sentence_id:
             session.execute(_BUMP_ENCOUNTERS, {
                 "sid": ev.sentence_id,

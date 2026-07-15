@@ -119,6 +119,14 @@ export default function WordPage() {
               {lex.senses.map((sense, index) => <div key={index} className="flex items-start gap-3"><span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">{index + 1}</span><p className="text-sm leading-relaxed text-foreground/90">{sense.py && <span className="mr-2 font-medium text-primary/70">{formatPinyin(sense.py, pinyinStyle)}</span>}{sense.defs.join("; ")}</p></div>)}
               {!lex.senses.length && <p className="text-sm text-muted-foreground">No dictionary entry. This may be a name or out-of-vocabulary token.</p>}
               {lex.stats && <><Separator /><div className="flex flex-wrap gap-4 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><Eye className="size-3.5" />Seen {lex.stats.encounters} times</span><span className="flex items-center gap-1.5"><BookMarked className="size-3.5" />Looked up {lex.stats.lookups} times</span></div></>}
+              {lex.state_source === "derived" && (lex.state === "familiar" || lex.state === "known") && lex.stats && (
+                <p className="mt-3 rounded-lg border border-teal-400/15 bg-teal-400/5 px-3 py-2 text-xs leading-relaxed text-teal-200/90">
+                  Marked <strong>{lex.state}</strong> automatically: seen {lex.stats.encounters} times
+                  across {lex.stats.distinct_items} {lex.stats.distinct_items === 1 ? "source" : "sources"}
+                  {lex.stats.lookups === 0 ? " and never looked up" : " with no recent lookups"}.
+                  Looking it up again moves it back to Learning.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -145,6 +153,7 @@ export default function WordPage() {
 
 function stateColor(state: string): string {
   if (state === "known") return "bg-emerald-400/12 text-emerald-300";
+  if (state === "familiar") return "bg-teal-400/12 text-teal-300";
   if (state === "learning") return "bg-amber-400/12 text-amber-300";
   if (state === "ignored") return "bg-muted text-muted-foreground";
   return "bg-sky-400/12 text-sky-300";

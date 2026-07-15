@@ -109,7 +109,9 @@ def test_ladder_pass_fail_and_graduation(client, seeded):
     assert r["rung"] == 0 and r["next_due_days"] == 1
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
-    assert r["graduated"]  # two straight passes -> export tray
+    assert r["rung"] == 2 and not r["graduated"]  # 3 passes but only just at top
+    r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
+    assert r["graduated"]  # >=3 passes ending at the top rung -> export tray
     # graduated items leave the queue
     assert client.get("/api/review/queue").json()["due"] == 0
 

@@ -84,12 +84,31 @@ def main() -> None:
             if time.time() - last_anki_check > 600:
                 last_anki_check = time.time()
                 _maybe_sync_anki(session)
+                _maybe_derive_knowledge(session)
             job = claim_next(session)
             if job is None:
                 time.sleep(settings.poll_interval)
                 continue
             log.info("job %s: %s %s", job.id, job.type, job.payload)
             run_one(session, job)
+
+
+def _maybe_derive_knowledge(session) -> None:
+    """Nightly passive-exposure promotion (see derive.py); cheap and idempotent."""
+    from datetime import timedelta
+
+    from .jobs import enqueue
+    from .models import Setting
+
+    last = session.get(Setting, "knowledge_last_derive")
+    if last and (last.value or {}).get("at"):
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(last.value["at"])
+        if age < timedelta(hours=24):
+            return
+    session.merge(Setting(key="knowledge_last_derive",
+                          value={"at": datetime.now(timezone.utc).isoformat()}))
+    session.commit()
+    enqueue(session, "derive_knowledge", {})
 
 
 def _maybe_sync_anki(session) -> None:

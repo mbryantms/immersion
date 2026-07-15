@@ -14,7 +14,7 @@ from ..models import Event, KnowledgeState, Lexeme, LexemeStats, SavedItem, Sett
 
 router = APIRouter()
 
-STATES = {"new", "learning", "known", "ignored"}
+STATES = {"new", "learning", "familiar", "known", "ignored"}
 
 
 def _clear_manual_state(lexeme_id: int, session: Session) -> dict:

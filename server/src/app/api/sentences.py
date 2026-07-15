@@ -157,6 +157,7 @@ def get_lexeme(lexeme_id: int, session: Session = Depends(get_session)):
     payload["stats"] = {
         "encounters": stats.encounters if stats else 0,
         "lookups": stats.lookups if stats else 0,
+        "distinct_items": stats.distinct_items if stats else 0,
         "first_seen": stats.first_seen if stats else None,
         "last_seen": stats.last_seen if stats else None,
     }

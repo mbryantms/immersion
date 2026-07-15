@@ -39,11 +39,11 @@ def stream_url(item: MediaItem, root_slug: str) -> str:
 
 
 def coverage_by_item(session: Session, item_ids: list[int]) -> dict[int, dict]:
-    """item_id -> {coverage, tokens, unknown_lexemes}; coverage counts known
-    tokens over non-ignored tokens."""
+    """item_id -> {coverage, tokens, unknown_lexemes}; coverage counts known +
+    familiar (passively-acquired, derive.py) tokens over non-ignored tokens."""
     if not item_ids:
         return {}
-    known = case((KnowledgeState.state == "known", 1), else_=0)
+    known = case((KnowledgeState.state.in_(("known", "familiar")), 1), else_=0)
     ignored = case((KnowledgeState.state == "ignored", 1), else_=0)
     unknown_lex = case(
         (func.coalesce(KnowledgeState.state, "new").in_(("new", "learning")), TokenOccurrence.lexeme_id)
@@ -79,8 +79,8 @@ class RootIn(BaseModel):
 
 
 def coverage_by_series(session: Session) -> dict[int, float]:
-    """series_id -> known-token share (non-ignored denominator)."""
-    known = case((KnowledgeState.state == "known", 1), else_=0)
+    """series_id -> known+familiar token share (non-ignored denominator)."""
+    known = case((KnowledgeState.state.in_(("known", "familiar")), 1), else_=0)
     ignored = case((KnowledgeState.state == "ignored", 1), else_=0)
     rows = session.execute(
         select(MediaItem.series_id, func.count(), func.sum(known), func.sum(ignored))
@@ -138,6 +138,46 @@ def get_library(session: Session = Depends(get_session)):
              "position_ms": p.position_ms, "duration_ms": i.duration_ms,
              "thumb_url": f"/media/thumbs/{i.id}.jpg", "updated_at": p.updated_at}
             for p, i in cont
+        ],
+    }
+
+
+@router.get("/recommendations")
+def recommendations(session: Session = Depends(get_session)):
+    """i+1 picks: ready, unfinished items whose known+familiar coverage sits in
+    the comprehension sweet spot — hard enough to feed acquisition, easy enough
+    to follow. Sorted by closeness to the target, ties broken by series order."""
+    LOW, TARGET, HIGH = 0.88, 0.95, 0.985
+    items = session.scalars(
+        select(MediaItem).where(MediaItem.available, MediaItem.ready)
+    ).all()
+    completed = {
+        p.item_id
+        for p in session.scalars(select(PlaybackProgress).where(PlaybackProgress.completed))
+    }
+    candidates = [i for i in items if i.id not in completed]
+    cov = coverage_by_item(session, [i.id for i in candidates])
+    scored = [
+        (abs(cov[i.id]["coverage"] - TARGET), i, cov[i.id])
+        for i in candidates
+        if i.id in cov and LOW <= cov[i.id]["coverage"] <= HIGH
+    ]
+    scored.sort(key=lambda t: (t[0], t[1].series_id or 0, t[1].ordinal or 0))
+    series_titles = {s.id: s.title for s in session.scalars(select(Series))}
+    return {
+        "band": {"low": LOW, "high": HIGH},
+        "items": [
+            {
+                "item_id": i.id, "title": i.title, "kind": i.kind,
+                "series_id": i.series_id,
+                "series_title": series_titles.get(i.series_id),
+                "ordinal": i.ordinal,
+                "duration_ms": i.duration_ms,
+                "thumb_url": f"/media/thumbs/{i.id}.jpg",
+                "coverage": c["coverage"],
+                "unknown_lexemes": c["unknown_lexemes"],
+            }
+            for _, i, c in scored[:6]
         ],
     }
 

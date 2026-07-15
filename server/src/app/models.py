@@ -161,7 +161,8 @@ class ExampleSentence(Base):
 class KnowledgeState(Base):
     __tablename__ = "knowledge_state"
     lexeme_id: Mapped[int] = mapped_column(ForeignKey("lexeme.id"), primary_key=True)
-    state: Mapped[str] = mapped_column(String)  # new|learning|known|ignored
+    state: Mapped[str] = mapped_column(String)  # new|learning|familiar|known|ignored
+    # familiar = derived from passive exposure (derive.py); any lookup demotes
     source: Mapped[str] = mapped_column(String)  # manual|anki|derived — manual > anki > derived
     anki_interval_days: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

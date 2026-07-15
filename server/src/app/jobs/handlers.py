@@ -84,6 +84,13 @@ def translate_item_handler(session: Session, payload: dict, progress) -> dict:
     return translate_item(session, payload["item_id"], progress)
 
 
+@handler("derive_knowledge")
+def derive_knowledge_handler(session: Session, payload: dict, progress) -> dict:
+    from ..derive import derive_knowledge
+
+    return derive_knowledge(session, progress)
+
+
 @handler("anki_import_known")
 def anki_import_known(session: Session, payload: dict, progress) -> dict:
     from ..anki.import_known import import_known

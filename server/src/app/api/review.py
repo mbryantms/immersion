@@ -36,6 +36,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _mark_known_on_graduation(session: Session, item: SavedItem) -> None:
+    """Graduating the funnel is retrieval evidence — reflect it in the
+    knowledge model (never overriding manual or Anki evidence)."""
+    from ..models import KnowledgeState
+
+    if not item.lexeme_id:
+        return
+    ks = session.get(KnowledgeState, item.lexeme_id)
+    if ks is None:
+        session.add(KnowledgeState(lexeme_id=item.lexeme_id, state="known",
+                                   source="derived", updated_at=_now()))
+    elif ks.source == "derived":
+        ks.state, ks.updated_at = "known", _now()
+
+
 def _fresh_context(session: Session, item: SavedItem) -> Sentence | None:
     """A concordance sentence that is NOT one of the saved contexts — later
     reviews should retrieve meaning in a new setting, not recognize the card."""
@@ -139,10 +154,13 @@ def review_outcome(saved_item_id: int, body: OutcomeIn, session: Session = Depen
     if body.result == "pass":
         rs.passes += 1
         rs.streak += 1
-        # graduate on clearing the 7d rung, or two straight passes anywhere
-        if rs.rung >= len(LADDER_DAYS) - 1 or rs.streak >= 2:
+        if rs.rung >= len(LADDER_DAYS) - 1 and rs.passes >= 3:
+            # durable enough to leave the funnel: >=3 spaced successes ending
+            # at the top rung (the old streak>=2 shortcut graduated items
+            # after ~2 days — too shallow for the spacing effect)
             rs.graduated = True
-        else:
+            _mark_known_on_graduation(session, item)
+        elif rs.rung < len(LADDER_DAYS) - 1:
             rs.rung += 1
     else:
         rs.fails += 1

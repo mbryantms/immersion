@@ -87,8 +87,14 @@ def dashboard(session: Session = Depends(get_session)):
         .where(func.coalesce(KnowledgeState.state, "new").in_(("new", "learning")))
         .where(Lexeme.is_dict.is_(True))
         # HSK 1–2 "unknowns" are almost always cold-start noise (的/我/了…),
-        # not real gaps at the levels this library targets
-        .where(func.coalesce(Lexeme.hsk_level, 99) >= 3)
+        # not real gaps at the levels this library targets. Words absent from
+        # the HSK lists slip that filter when they're common compounds
+        # (一个/这个) — require them to also be outside the top of the
+        # frequency lexicon before calling them noteworthy gaps.
+        .where(
+            (Lexeme.hsk_level >= 3)
+            | (Lexeme.hsk_level.is_(None) & (func.coalesce(Lexeme.freq_rank, 10**9) > 1500))
+        )
         .group_by(Lexeme.id)
         .order_by(func.count(func.distinct(TokenOccurrence.item_id)).desc(),
                   func.count(TokenOccurrence.lexeme_id).desc())

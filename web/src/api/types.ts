@@ -131,7 +131,9 @@ export interface ItemDetail {
   unknown_lexemes?: number;
 }
 
-export type KnowledgeStateName = "new" | "learning" | "known" | "ignored";
+// familiar = derived automatically from repeated passive exposure without
+// lookups; renders like known, demoted to learning by any lookup
+export type KnowledgeStateName = "new" | "learning" | "familiar" | "known" | "ignored";
 
 export interface KnowledgeMap {
   states: Record<string, KnowledgeStateName>;
@@ -151,7 +153,7 @@ export interface LexemeInfo {
   state: KnowledgeStateName;
   state_source: string | null;
   saved_item_id: number | null;
-  stats?: { encounters: number; lookups: number; first_seen: string | null; last_seen: string | null };
+  stats?: { encounters: number; lookups: number; distinct_items: number; first_seen: string | null; last_seen: string | null };
 }
 
 export interface LookupResult {
