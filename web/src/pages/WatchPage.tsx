@@ -2,9 +2,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { QueryError } from "@/components/ErrorBoundary";
 import { Skeleton } from "@/components/ui/skeleton";
 import { post } from "../api/client";
 import {
@@ -38,7 +40,7 @@ export default function WatchPage() {
   const videoRef = useRef<MediaEl | null>(null);
   const playerRef = useRef<HTMLDivElement | null>(null);
 
-  const { data: item } = useItem(id);
+  const { data: item, isError: itemError, refetch: refetchItem } = useItem(id);
   const { data: sentData } = useSentences(id);
   const { data: knowledgeData } = useKnowledge(id);
   const sentences = useMemo(() => sentData?.sentences ?? [], [sentData]);
@@ -248,14 +250,26 @@ export default function WatchPage() {
 
   const saveWord = useCallback(
     (lexemeId: number, surface: string, sentenceId: number) => {
-      saveItem.mutate({ kind: "word", lexeme_id: lexemeId, surface, sentence_id: sentenceId });
+      saveItem.mutate(
+        { kind: "word", lexeme_id: lexemeId, surface, sentence_id: sentenceId },
+        {
+          onSuccess: (r) => toast.success(r.created ? `Saved ${surface}` : `${surface} — added this context`),
+          onError: () => toast.error(`Couldn't save ${surface}`),
+        },
+      );
       track("save", { item_id: id, sentence_id: sentenceId, lexeme_id: lexemeId });
     },
     [saveItem, id],
   );
   const saveSentence = useCallback(
     (sentenceId: number) => {
-      saveItem.mutate({ kind: "sentence", sentence_id: sentenceId });
+      saveItem.mutate(
+        { kind: "sentence", sentence_id: sentenceId },
+        {
+          onSuccess: (r) => toast.success(r.created ? "Sentence saved" : "Sentence already in your queue"),
+          onError: () => toast.error("Couldn't save sentence"),
+        },
+      );
       track("save_sentence", { item_id: id, sentence_id: sentenceId });
     },
     [saveItem, id],
@@ -339,6 +353,7 @@ export default function WatchPage() {
     Escape: closeGloss,
   }, gloss ? [" ", "Escape"] : ["Escape"]);
 
+  if (itemError) return <QueryError onRetry={() => void refetchItem()} />;
   if (!item) {
     return (
       <div className="mx-auto grid h-[calc(100vh-53px)] max-w-[1600px] gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_400px]">
@@ -720,6 +735,7 @@ export default function WatchPage() {
               }),
             );
             selected.forEach((lookup) => track("save", { item_id: id, sentence_id: lookup.sentenceId, lexeme_id: lookup.lexemeId }));
+            toast.success(`Saved ${selected.length} word${selected.length === 1 ? "" : "s"} to your review queue`);
             setSummaryOpen(false);
           }}
           onClose={() => setSummaryOpen(false)}

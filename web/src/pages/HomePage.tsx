@@ -1,5 +1,8 @@
-import { ArrowRight, BookOpen, Brain, Clock3, Headphones, Layers3, Search, Sparkles } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowRight, BookOpen, BookmarkPlus, Brain, Clock3, Headphones, Layers3, Search, Sparkles, Target } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
 import { ContinueCard } from "@/components/media/MediaCards";
 import { Page, PageHeader, SectionHeader } from "@/components/layout/Page";
@@ -7,13 +10,31 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useDashboard, useLibrary } from "../api/queries";
+import { post } from "../api/client";
+import { useDashboard, useLibrary, useRecommendations } from "../api/queries";
+import { formatPinyin } from "../lib/pinyin";
+import { usePrefs } from "../lib/prefs";
 
 export default function HomePage() {
   const { data: stats, isLoading: statsLoading } = useDashboard();
   const { data: library, isLoading: libraryLoading } = useLibrary();
+  const { data: recs } = useRecommendations();
+  const pinyinStyle = usePrefs((p) => p.pinyinStyle);
+  const qc = useQueryClient();
+  const [queued, setQueued] = useState<Set<number>>(new Set());
   const weeks = stats?.weeks.slice(-6) ?? [];
   const maxMinutes = Math.max(1, ...weeks.map((week) => week.video_minutes + week.audio_minutes));
+
+  const addToReview = (lexemeId: number, surface: string) => {
+    post("/saved-items", { kind: "word", lexeme_id: lexemeId, surface })
+      .then(() => {
+        setQueued((prev) => new Set(prev).add(lexemeId));
+        qc.invalidateQueries({ queryKey: ["dashboard"] });
+        qc.invalidateQueries({ queryKey: ["saved"] });
+        toast.success(`${surface} added to your review queue`);
+      })
+      .catch(() => toast.error(`Couldn't save ${surface}`));
+  };
 
   return (
     <Page>
@@ -75,6 +96,37 @@ export default function HomePage() {
         </Card>
       </section>
 
+      {!!recs?.items.length && (
+        <section>
+          <SectionHeader
+            title="In your sweet spot"
+            description={`Episodes ${Math.round(recs.band.low * 100)}–${Math.round(recs.band.high * 100)}% familiar — hard enough to grow on, easy enough to follow`}
+          />
+          <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+            {recs.items.map((rec) => (
+              <Link
+                key={rec.item_id}
+                to={`/watch/${rec.item_id}`}
+                className="group w-64 shrink-0 overflow-hidden rounded-2xl border border-border/70 bg-card/55 transition hover:border-primary/30"
+              >
+                <div className="relative aspect-video overflow-hidden bg-muted">
+                  <img src={rec.thumb_url} alt="" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
+                  <Badge className="absolute right-2 top-2 border-0 bg-black/70 text-[10px] text-teal-300">
+                    <Target className="size-3" /> {Math.round(rec.coverage * 100)}%
+                  </Badge>
+                </div>
+                <div className="px-3.5 py-2.5">
+                  <p className="truncate text-sm font-medium">{rec.title}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {rec.series_title ?? (rec.kind === "audio" ? "Podcast" : "Video")} · {rec.unknown_lexemes} words to learn
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
       {(libraryLoading || !!library?.continue.length) && (
         <section>
           <SectionHeader title="Continue immersing" description="Pick up exactly where you left off" action={<Button asChild variant="ghost" size="sm"><Link to="/library">View library<ArrowRight /></Link></Button>} />
@@ -95,11 +147,26 @@ export default function HomePage() {
           <SectionHeader title="Words following you around" description="Unknown words recurring across multiple sources are usually worth noticing" />
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {stats.recurring_unknowns.map((word) => (
-              <Link key={word.lexeme_id} to={`/word/${word.lexeme_id}`} className="group flex items-center gap-3 rounded-xl border border-border/70 bg-card/55 px-3.5 py-3 transition hover:border-primary/30 hover:bg-card">
-                <span className="flex size-10 items-center justify-center rounded-xl bg-primary/8 font-zh text-xl text-foreground">{word.simplified}</span>
-                <span className="min-w-0 flex-1"><span className="block truncate text-xs text-muted-foreground">{word.pinyin ?? "Recurring word"}</span><span className="text-[10px] text-muted-foreground">{word.occurrences} encounters in {word.items} sources</span></span>
-                <ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-primary" />
-              </Link>
+              <div key={word.lexeme_id} className="group flex items-center gap-3 rounded-xl border border-border/70 bg-card/55 px-3.5 py-3 transition hover:border-primary/30 hover:bg-card">
+                <Link to={`/word/${word.lexeme_id}`} className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/8 font-zh text-xl text-foreground">{word.simplified}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-stone-300">{formatPinyin(word.pinyin, pinyinStyle) || "Recurring word"}</span>
+                    <span className="text-[11px] text-muted-foreground">{word.occurrences} encounters in {word.items} sources</span>
+                  </span>
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={queued.has(word.lexeme_id)}
+                  onClick={() => addToReview(word.lexeme_id, word.simplified)}
+                  title={queued.has(word.lexeme_id) ? "In your review queue" : "Add to review queue"}
+                  aria-label={`Add ${word.simplified} to review queue`}
+                  className="shrink-0 text-muted-foreground hover:text-teal-300"
+                >
+                  <BookmarkPlus className={queued.has(word.lexeme_id) ? "text-teal-500" : ""} />
+                </Button>
+              </div>
             ))}
           </div>
         </section>

@@ -2,7 +2,9 @@ import { ArrowLeft, ArrowUpRight, BookMarked, Check, CircleSlash2, Eye, LibraryB
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
+import { QueryError } from "@/components/ErrorBoundary";
 import { LoadingPage, Page, SectionHeader } from "@/components/layout/Page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +21,7 @@ import CharacterStrokes from "../word/CharacterStrokes";
 export default function WordPage() {
   const id = Number(useParams().id);
   const queryClient = useQueryClient();
-  const { data: lex, isLoading } = useLexeme(id);
+  const { data: lex, isLoading, isError, refetch } = useLexeme(id);
   const { data: concordance } = useConcordance(id);
   const { data: examples } = useExamples(id);
   const pinyinStyle = usePrefs((prefs) => prefs.pinyinStyle);
@@ -27,15 +29,22 @@ export default function WordPage() {
   const [resetOpen, setResetOpen] = useState(false);
 
   if (isLoading) return <LoadingPage label="Loading word" />;
-  if (!lex) return null;
+  if (isError || !lex) return <QueryError onRetry={() => void refetch()} />;
 
   const updateState = async (state: KnowledgeStateName) => {
     setUpdating(true);
     try {
-      if (lex.state === state && lex.state_source === "manual") await clearKnowledge(id);
-      else await setKnowledge(id, state);
+      if (lex.state === state && lex.state_source === "manual") {
+        await clearKnowledge(id);
+        toast.success(`${lex.simplified}: manual mark removed`);
+      } else {
+        await setKnowledge(id, state);
+        toast.success(`${lex.simplified} marked ${state}`);
+      }
       await queryClient.invalidateQueries({ queryKey: ["lexeme", id] });
       void queryClient.invalidateQueries({ queryKey: ["knowledge"] });
+    } catch {
+      toast.error("Update failed");
     } finally {
       setUpdating(false);
     }

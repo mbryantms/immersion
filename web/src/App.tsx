@@ -9,8 +9,10 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Toaster } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LoadingPage } from "@/components/layout/Page";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -58,6 +60,13 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
+      <Toaster
+        theme="dark"
+        position="bottom-center"
+        offset={{ bottom: "calc(4.75rem + env(safe-area-inset-bottom))" }}
+        mobileOffset={{ bottom: "calc(4.75rem + env(safe-area-inset-bottom))" }}
+        toastOptions={{ style: { background: "#18201d", border: "1px solid rgb(255 255 255 / 0.1)", color: "#e7e5e4" } }}
+      />
       <div className="min-h-screen pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
         <header className="sticky top-0 z-40 h-[53px] border-b border-border/70 bg-background/82 px-3 backdrop-blur-xl supports-[backdrop-filter]:bg-background/72 sm:px-5">
           <div className="mx-auto flex h-full max-w-[1680px] items-center">
@@ -79,6 +88,7 @@ export default function App() {
           </div>
         </header>
 
+        <ErrorBoundary>
         <Suspense fallback={<LoadingPage />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
@@ -93,6 +103,7 @@ export default function App() {
             <Route path="/admin" element={<JobsPage />} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden" aria-label="Mobile navigation">
           <div className="mx-auto grid h-16 max-w-lg grid-cols-5 px-1.5">

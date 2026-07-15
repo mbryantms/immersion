@@ -73,7 +73,26 @@ export function useSaveItem(itemId: number) {
       surface?: string;
       sentence_id?: number;
     }) => post<{ id: number; created: boolean }>("/saved-items", body),
-    onSuccess: () => {
+    onMutate: async (body) => {
+      // optimistic: the token's saved highlight should be instant, like the
+      // knowledge recolor — not gated on an invalidation round-trip
+      if (body.kind !== "word" || !body.lexeme_id) return {};
+      await qc.cancelQueries({ queryKey: ["knowledge", itemId] });
+      const prev = qc.getQueryData<KnowledgeMap>(["knowledge", itemId]);
+      if (prev && !prev.saved.includes(body.lexeme_id)) {
+        const state = prev.states[body.lexeme_id];
+        qc.setQueryData<KnowledgeMap>(["knowledge", itemId], {
+          ...prev,
+          saved: [...prev.saved, body.lexeme_id],
+          states: state && state !== "new"
+            ? prev.states
+            : { ...prev.states, [body.lexeme_id]: "learning" },
+        });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(["knowledge", itemId], ctx.prev),
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["knowledge", itemId] });
       qc.invalidateQueries({ queryKey: ["saved"] });
     },
@@ -148,6 +167,13 @@ export const useReviewQueue = () =>
 
 export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string; score?: number }) =>
   post<import("./types").ReviewOutcome>(`/review/${savedItemId}/outcome`, body);
+
+export const useRecommendations = () =>
+  useQuery({
+    queryKey: ["recommendations"],
+    queryFn: () => get<{ band: { low: number; high: number }; items: import("./types").Recommendation[] }>("/recommendations"),
+    staleTime: 5 * 60_000, // coverage moves slowly; don't recompute per visit
+  });
 
 export const useDashboard = () =>
   useQuery({

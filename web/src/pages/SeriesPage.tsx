@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { EpisodeCard } from "@/components/media/MediaCards";
+import { QueryError } from "@/components/ErrorBoundary";
 import { EmptyState, LoadingPage, Page, PageHeader } from "@/components/layout/Page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,12 +16,12 @@ type View = "all" | "ready" | "unfinished";
 
 export default function SeriesPage() {
   const id = Number(useParams().id);
-  const { data, isLoading } = useSeries(id);
+  const { data, isLoading, isError, refetch } = useSeries(id);
   const [view, setView] = useState<View>("all");
   const items = useMemo(() => (data?.items ?? []).filter((item) => view === "all" || (view === "ready" ? item.ready : !item.completed)), [data, view]);
 
   if (isLoading) return <LoadingPage label="Loading series" />;
-  if (!data) return null;
+  if (isError || !data) return <QueryError onRetry={() => void refetch()} />;
 
   const ready = data.items.filter((item) => item.ready).length;
   const completed = data.items.filter((item) => item.completed).length;

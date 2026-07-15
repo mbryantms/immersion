@@ -263,6 +263,19 @@ export interface DashboardStats {
   anki: { last_import: unknown; last_export: unknown };
 }
 
+export interface Recommendation {
+  item_id: number;
+  title: string;
+  kind: string;
+  series_id: number | null;
+  series_title: string | null;
+  ordinal: number | null;
+  duration_ms: number | null;
+  thumb_url: string;
+  coverage: number;
+  unknown_lexemes: number;
+}
+
 export interface SearchResult {
   sentence_id: number;
   item_id: number;

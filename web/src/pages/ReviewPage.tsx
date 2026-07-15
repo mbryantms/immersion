@@ -2,6 +2,7 @@ import { ArrowLeft, Check, CircleX, Coffee, Headphones, Keyboard, Play, Send, Vo
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { QueryError } from "@/components/ErrorBoundary";
 import { LoadingPage, Page } from "@/components/layout/Page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import type { ReviewItem } from "../api/types";
 import ExportTray from "../saved/ExportTray";
 
 export default function ReviewPage() {
-  const { data, refetch } = useReviewQueue();
+  const { data, isError, refetch } = useReviewQueue();
   const [position, setPosition] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [typed, setTyped] = useState("");
@@ -70,6 +71,7 @@ export default function ReviewPage() {
     setRevealed(true);
   };
 
+  if (isError) return <QueryError onRetry={() => void refetch()} />;
   if (!data) return <LoadingPage label="Preparing review" />;
 
   if (!current) {

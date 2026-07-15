@@ -2,6 +2,7 @@ import { ArchiveX, ArrowUpRight, Check, ExternalLink, PackageOpen, RotateCcw, Se
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { EmptyState, Page, PageHeader } from "@/components/layout/Page";
 import { Badge } from "@/components/ui/badge";
@@ -37,13 +38,24 @@ export default function SavedPage() {
 
   const bulkKnowledge = async (state: "known" | "ignored") => {
     const lexemes = selectedItems.flatMap((item) => item.lexeme_id ? [item.lexeme_id] : []);
-    await Promise.all(lexemes.map((id) => setKnowledge(id, state)));
+    try {
+      await Promise.all(lexemes.map((id) => setKnowledge(id, state)));
+      toast.success(`Marked ${lexemes.length} word${lexemes.length === 1 ? "" : "s"} ${state}`);
+    } catch {
+      toast.error("Some updates failed — check and retry");
+    }
     setSelected(new Set());
     void queryClient.invalidateQueries({ queryKey: ["knowledge"] });
   };
 
   const bulkRemove = async () => {
-    await Promise.all(selectedItems.map((item) => unsave.mutateAsync(item.id)));
+    const n = selectedItems.length;
+    try {
+      await Promise.all(selectedItems.map((item) => unsave.mutateAsync(item.id)));
+      toast.success(`Removed ${n} item${n === 1 ? "" : "s"} from your queue`);
+    } catch {
+      toast.error("Some removals failed — check and retry");
+    }
     setSelected(new Set());
   };
 
