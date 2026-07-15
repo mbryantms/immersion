@@ -11,29 +11,33 @@
 
 	handle_path /media/thumbs/* {
 		root * /home/matthew/.local/share/immersion/cache/thumbs
+		@exists file
+		header @exists Cache-Control "public, max-age=604800"
 		file_server
-		header Cache-Control "public, max-age=604800"
 	}
 
 	# podcast m4a cache (ingest-transcoded; filename = <item_id>.m4a)
 	handle_path /media/audio/* {
 		root * /home/matthew/.local/share/immersion/cache/audio
+		@exists file
+		header @exists Cache-Control "public, max-age=604800"
 		file_server
-		header Cache-Control "public, max-age=604800"
 	}
 
 	# browser-safe mp4 remux cache (filename = <item_id>.mp4)
 	handle_path /media/remux/* {
 		root * /home/matthew/.local/share/immersion/cache/remux
+		@exists file
+		header @exists Cache-Control "public, max-age=604800"
 		file_server
-		header Cache-Control "public, max-age=604800"
 	}
 
 	# one handle_path per media root, path prefix = root slug
 	handle_path /media/lfc/* {
 		root * /mnt/lfc
+		@exists file
+		header @exists Cache-Control "public, max-age=604800"
 		file_server
-		header Cache-Control "public, max-age=604800"
 	}
 
 	handle {

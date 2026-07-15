@@ -129,14 +129,14 @@ def get_library(session: Session = Depends(get_session)):
              "title": s.title, "level": s.level_hint,
              "episodes": counts.get(s.id, 0), "ready": ready_counts.get(s.id, 0),
              "coverage": coverage.get(s.id),
-             "cover_url": f"/media/thumbs/{s.cover_item_id}.jpg" if s.cover_item_id else None}
+             "cover_url": f"/media/thumbs/{s.cover_item_id}.jpg?v=2" if s.cover_item_id else None}
             for s in series
             if counts.get(s.id, 0) > 0
         ],
         "continue": [
             {"item_id": i.id, "title": i.title, "series_id": i.series_id,
              "position_ms": p.position_ms, "duration_ms": i.duration_ms,
-             "thumb_url": f"/media/thumbs/{i.id}.jpg", "updated_at": p.updated_at}
+             "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2", "updated_at": p.updated_at}
             for p, i in cont
         ],
     }
@@ -182,7 +182,7 @@ def recommendations(session: Session = Depends(get_session)):
                 "series_title": series_titles.get(i.series_id),
                 "ordinal": i.ordinal,
                 "duration_ms": i.duration_ms,
-                "thumb_url": f"/media/thumbs/{i.id}.jpg",
+                "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2",
                 "coverage": c["coverage"],
                 "unknown_lexemes": c["unknown_lexemes"],
             }
@@ -237,7 +237,7 @@ def get_series(series_id: int, session: Session = Depends(get_session)):
                 "id": i.id, "title": i.title, "ordinal": i.ordinal,
                 "duration_ms": i.duration_ms, "ready": i.ready, "available": i.available,
                 "has_zh": i.id in has_zh,
-                "thumb_url": f"/media/thumbs/{i.id}.jpg",
+                "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2",
                 "position_ms": progress[i.id].position_ms if i.id in progress else 0,
                 "completed": progress[i.id].completed if i.id in progress else False,
                 **cov.get(i.id, {}),
@@ -289,7 +289,7 @@ def get_item(item_id: int, session: Session = Depends(get_session)):
         "width": item.width, "height": item.height,
         "series": {"id": series.id, "title": series.title, "level": series.level_hint} if series else None,
         "stream_url": stream_url(item, root.slug),
-        "thumb_url": f"/media/thumbs/{item.id}.jpg",
+        "thumb_url": f"/media/thumbs/{item.id}.jpg?v=2",
         "tracks": [
             {"id": t.id, "lang": t.lang, "source": t.source, "format": t.format,
              "offset_ms": t.offset_ms, "selected": t.selected}
