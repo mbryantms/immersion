@@ -8,8 +8,14 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 
 from ..config import settings
+
+# Concurrent long generations share one subscription token-rate budget and end
+# up slower than running back-to-back (measured: 2 parallel ≈ 65s each vs
+# 26s+20s serial). Serialize all CLI calls in this process.
+_cli_lock = threading.Lock()
 
 
 class ProviderUnavailable(RuntimeError):
@@ -25,10 +31,11 @@ def complete_json(prompt: str, timeout_s: int = 600) -> list | dict:
     around the payload — takes the outermost [...] or {...})."""
     if not available():
         raise ProviderUnavailable("claude CLI not on PATH")
-    proc = subprocess.run(
-        ["claude", "-p", "--output-format", "text", "--model", settings.ai_model],
-        input=prompt, capture_output=True, text=True, timeout=timeout_s,
-    )
+    with _cli_lock:
+        proc = subprocess.run(
+            ["claude", "-p", "--output-format", "text", "--model", settings.ai_model],
+            input=prompt, capture_output=True, text=True, timeout=timeout_s,
+        )
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr[:500]}")
     text = proc.stdout.strip()

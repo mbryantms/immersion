@@ -9,8 +9,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { explainSentence } from "../api/queries";
-import type { ExplainResult, SentenceOut } from "../api/types";
+import { explainSentence, explainSentenceExtras } from "../api/queries";
+import type { ExplainCore, ExplainExtras, SentenceOut } from "../api/types";
 import { posLabel } from "../lib/pos";
 
 interface Props {
@@ -22,16 +22,26 @@ interface Props {
  *  dictionary glosses come from the app's own analysis/lexicon; the AI layer
  *  (grounded on that tokenization) adds translations, structure, particle
  *  logic, pronunciation notes, register variations, pattern examples, and
- *  pitfalls. Provenance always shown. */
+ *  pitfalls. The two halves generate in parallel server-side — core renders
+ *  as soon as it lands, extras fill in below. Provenance always shown. */
 export default function ExplainSheet({ sentence, onClose }: Props) {
-  const [result, setResult] = useState<ExplainResult | null>(null);
+  const [result, setResult] = useState<ExplainCore | null>(null);
+  const [extras, setExtras] = useState<ExplainExtras | null>(null);
+  const [extrasFailed, setExtrasFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    // core first, extras chained after: one provider token budget, so
+    // back-to-back beats parallel and core is what the user reads first
     explainSentence(sentence.id)
       .then((r) => !cancelled && setResult(r))
-      .catch((e: Error) => !cancelled && setError(e.message));
+      .catch((e: Error) => !cancelled && setError(e.message))
+      .finally(() => {
+        explainSentenceExtras(sentence.id)
+          .then((r) => !cancelled && setExtras(r))
+          .catch(() => !cancelled && setExtrasFailed(true));
+      });
     return () => {
       cancelled = true;
     };
@@ -91,7 +101,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
               <Section label="Word by word">
                 <div className="space-y-1">
                   {result.words.map((word, i) => (
-                    <div key={i} className="rounded-lg bg-white/[0.03] px-3 py-2">
+                    <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
                       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
                         <span className="font-zh text-[15px] text-teal-200">{word.zh}</span>
                         {word.py && <span className="text-[11px] text-stone-500">{word.py}</span>}
@@ -112,7 +122,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
               <Section label="Particles & function words">
                 <div className="space-y-1">
                   {result.particles.map((particle, i) => (
-                    <div key={i} className="flex items-baseline gap-3 rounded-lg bg-white/[0.03] px-3 py-2">
+                    <div key={i} className="flex items-baseline gap-3 rounded-lg bg-white/3 px-3 py-2">
                       <span className="font-zh shrink-0 text-[15px] text-violet-300">{particle.zh}</span>
                       <span className="text-xs leading-relaxed text-stone-400">{particle.note}</span>
                     </div>
@@ -121,50 +131,62 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
               </Section>
             )}
 
-            {result.pronunciation.length > 0 && (
-              <Section label="Pronunciation">
-                <BulletList items={result.pronunciation} />
-              </Section>
+            {!extras && !extrasFailed && (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="h-14 w-full" />
+                <p className="text-[11px] text-stone-600">Pronunciation, variations, patterns & pitfalls on the way…</p>
+              </div>
             )}
 
-            {result.nuance && (
-              <Section label="Nuance">
-                <p className="text-xs leading-relaxed text-stone-300">{result.nuance}</p>
-              </Section>
-            )}
+            {extras && (
+              <>
+                {extras.pronunciation.length > 0 && (
+                  <Section label="Pronunciation">
+                    <BulletList items={extras.pronunciation} />
+                  </Section>
+                )}
 
-            {result.variations.length > 0 && (
-              <Section label="Other ways to say it">
-                <div className="space-y-1">
-                  {result.variations.map((variation, i) => (
-                    <div key={i} className="rounded-lg bg-white/[0.03] px-3 py-2">
-                      <p className="font-zh text-[15px] text-stone-100">{variation.zh}</p>
-                      <p className="text-[11px] text-stone-500">{variation.py}</p>
-                      <p className="mt-0.5 text-xs text-stone-400">{variation.note}</p>
+                {extras.nuance && (
+                  <Section label="Nuance">
+                    <p className="text-xs leading-relaxed text-stone-300">{extras.nuance}</p>
+                  </Section>
+                )}
+
+                {extras.variations.length > 0 && (
+                  <Section label="Other ways to say it">
+                    <div className="space-y-1">
+                      {extras.variations.map((variation, i) => (
+                        <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
+                          <p className="font-zh text-[15px] text-stone-100">{variation.zh}</p>
+                          <p className="text-[11px] text-stone-500">{variation.py}</p>
+                          <p className="mt-0.5 text-xs text-stone-400">{variation.note}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </Section>
-            )}
+                  </Section>
+                )}
 
-            {result.pattern?.examples && result.pattern.examples.length > 0 && (
-              <Section label={`Pattern${result.pattern.name ? ` · ${result.pattern.name}` : ""}`}>
-                <div className="space-y-1">
-                  {result.pattern.examples.map((example, i) => (
-                    <div key={i} className="rounded-lg bg-white/[0.03] px-3 py-2">
-                      <p className="font-zh text-[15px] text-stone-100">{example.zh}</p>
-                      <p className="text-[11px] text-stone-500">{example.py}</p>
-                      <p className="mt-0.5 text-xs text-stone-400">{example.en}</p>
+                {extras.pattern?.examples && extras.pattern.examples.length > 0 && (
+                  <Section label={`Pattern${extras.pattern.name ? ` · ${extras.pattern.name}` : ""}`}>
+                    <div className="space-y-1">
+                      {extras.pattern.examples.map((example, i) => (
+                        <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
+                          <p className="font-zh text-[15px] text-stone-100">{example.zh}</p>
+                          <p className="text-[11px] text-stone-500">{example.py}</p>
+                          <p className="mt-0.5 text-xs text-stone-400">{example.en}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </Section>
-            )}
+                  </Section>
+                )}
 
-            {result.mistakes.length > 0 && (
-              <Section label="Watch out for">
-                <BulletList items={result.mistakes} accent="text-amber-500" />
-              </Section>
+                {extras.mistakes.length > 0 && (
+                  <Section label="Watch out for">
+                    <BulletList items={extras.mistakes} accent="text-amber-500" />
+                  </Section>
+                )}
+              </>
             )}
 
             <Badge variant="secondary" className="text-[10px] text-muted-foreground">

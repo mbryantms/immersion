@@ -5,6 +5,7 @@ sentence instead of redoing the episode (podreader was all-or-nothing)."""
 from __future__ import annotations
 
 import hashlib
+import threading
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -23,8 +24,11 @@ sentence, same order, no commentary.
 {numbered}"""
 
 
-EXPLAIN_PROMPT_VERSION = "2"
-EXPLAIN_PROMPT = """You are helping an intermediate Mandarin learner deeply understand ONE
+EXPLAIN_PROMPT_VERSION = "3"
+# The explanation is generated as two halves run in PARALLEL (CLI latency is
+# dominated by output length, so halving each call's output roughly halves the
+# wall clock) and the UI renders core as soon as it lands.
+EXPLAIN_CORE_PROMPT = """You are helping an intermediate Mandarin learner deeply understand ONE
 sentence from something they are watching. Be concrete and concise; no praise,
 no filler. Facts they can see (pinyin, HSK levels, dictionary glosses) are
 supplied by the app — your job is the interpretive layer.
@@ -32,22 +36,31 @@ supplied by the app — your job is the interpretive layer.
 Sentence: {zh}
 Tokenized as: {tokens}
 {en_line}
-Return ONLY JSON with this shape (omit nothing; use "" / [] when not applicable):
+Return ONLY JSON with this shape:
 {{"natural": "natural English translation",
   "literal": "word-for-word gloss preserving Chinese order, e.g. 'he use hand twist-tight [done] loose parts'",
   "structure": "1-3 sentences: why the sentence is ordered/built this way",
-  "words": [{{"zh": "token or adjacent-token group", "role": "grammatical role + in-context meaning, <=15 words"}}],
-  "particles": [{{"zh": "了/着/过/吧/呢/来/给/的/得/地/把/被...", "note": "why THIS particle here, what changes without it, <=20 words"}}],
-  "pronunciation": ["tone sandhi / erhua / neutral-tone reductions / connected-speech notes that apply HERE; [] if none"],
-  "nuance": "cultural or contextual nuance; \\"\\" if none",
-  "variations": [{{"zh": "same meaning, different register or region", "note": "e.g. more formal / casual / Taiwan usage"}}],
-  "pattern": {{"name": "the sentence's key grammar pattern", "examples": [{{"zh": "new example sentence using the pattern", "en": "its translation"}}]}},
-  "mistakes": ["common learner mistakes with this pattern, <=20 words each"]}}
+  "words": [{{"zh": "token or adjacent-token group", "role": "grammatical role + in-context meaning, <=12 words"}}],
+  "particles": [{{"zh": "了/着/过/吧/呢/来/给/的/得/地/把/被...", "note": "why THIS particle here, what changes without it, <=18 words"}}]}}
 
 Rules: words[] must cover the sentence in order using ONLY the given tokens
 (adjacent tokens may be grouped; skip punctuation). particles[] covers every
-function word present. variations and pattern.examples max 2 each; mistakes
-max 3. Keep the total tight — this renders on one card."""
+function word present ([] if none). Keep it tight."""
+
+EXPLAIN_EXTRAS_PROMPT = """You are helping an intermediate Mandarin learner go deeper on ONE sentence
+from something they are watching. Be concrete and concise; no filler.
+
+Sentence: {zh}
+Tokenized as: {tokens}
+{en_line}
+Return ONLY JSON with this shape (use "" / [] when not applicable):
+{{"pronunciation": ["tone sandhi / erhua / neutral-tone reductions / connected-speech notes that apply HERE; [] if none"],
+  "nuance": "cultural or contextual nuance; \\"\\" if none",
+  "variations": [{{"zh": "same meaning, different register or region", "note": "e.g. more formal / casual / Taiwan usage"}}],
+  "pattern": {{"name": "the sentence's key grammar pattern", "examples": [{{"zh": "new example sentence using the pattern", "en": "its translation"}}]}},
+  "mistakes": ["common learner mistakes with this pattern, <=18 words each"]}}
+
+Rules: variations and pattern.examples max 2 each; mistakes max 3. Keep it tight."""
 
 
 def _sentence_pinyin(words: list[dict]) -> str:
@@ -109,24 +122,20 @@ def _merge_breakdown(ai_words: list[dict], zh_tokens: list[dict], lex_by_id: dic
     return out
 
 
-def explain_sentence(session: Session, sentence: Sentence) -> AiArtifact:
-    """Cached AI explanation of one sentence; the cache key is the zh text, so
-    re-ingested episodes reuse explanations for unchanged sentences. The AI is
-    grounded on the app's own tokenization; pinyin/HSK/POS/glosses are merged
-    in from the analysis + lexicon rather than generated."""
-    from ..models import Lexeme
+# One generation per (artifact_type, zh) at a time: a speculative prefetch and
+# an Explain click for the same sentence coalesce instead of both paying the
+# provider. Locks are tiny and never removed — the working set is small.
+_inflight: dict[str, threading.Lock] = {}
+_inflight_guard = threading.Lock()
 
-    input_hash = hashlib.sha256(sentence.zh.encode()).hexdigest()[:16]
-    cached = session.scalar(
-        select(AiArtifact).where(
-            AiArtifact.target_kind == "sentence",
-            AiArtifact.artifact_type == "explanation",
-            AiArtifact.input_hash == input_hash,
-            AiArtifact.prompt_version == EXPLAIN_PROMPT_VERSION,
-        )
-    )
-    if cached is not None:
-        return cached
+
+def _flight_lock(key: str) -> threading.Lock:
+    with _inflight_guard:
+        return _inflight.setdefault(key, threading.Lock())
+
+
+def _explain_context(session: Session, sentence: Sentence):
+    from ..models import Lexeme
 
     words = (sentence.analysis or {}).get("words", [])
     zh_tokens = [w for w in words if w.get("type") == "zh"]
@@ -135,45 +144,84 @@ def explain_sentence(session: Session, sentence: Sentence) -> AiArtifact:
         lex.id: lex
         for lex in session.scalars(select(Lexeme).where(Lexeme.id.in_(lex_ids)))
     } if lex_ids else {}
+    return words, zh_tokens, lex_by_id
 
-    en_line = f"Track translation (context, may be loose): {sentence.en}\n" if sentence.en else ""
-    result = provider.complete_json(
-        EXPLAIN_PROMPT.format(
-            zh=sentence.zh,
-            tokens=" | ".join(w["t"] for w in zh_tokens) or sentence.zh,
-            en_line=en_line,
-        ),
-        timeout_s=180,
+
+def _cached_artifact(session: Session, artifact_type: str, input_hash: str) -> AiArtifact | None:
+    return session.scalar(
+        select(AiArtifact).where(
+            AiArtifact.target_kind == "sentence",
+            AiArtifact.artifact_type == artifact_type,
+            AiArtifact.input_hash == input_hash,
+            AiArtifact.prompt_version == EXPLAIN_PROMPT_VERSION,
+        )
     )
-    if not isinstance(result, dict) or "natural" not in result:
-        raise RuntimeError(f"malformed explanation payload: {str(result)[:200]}")
 
-    result["words"] = _merge_breakdown(result.get("words") or [], zh_tokens, lex_by_id)
-    for ex in (result.get("pattern") or {}).get("examples") or []:
-        if ex.get("zh"):
-            ex["py"] = _tts_pinyin(ex["zh"])
-    for var in result.get("variations") or []:
-        if var.get("zh"):
-            var["py"] = _tts_pinyin(var["zh"])
-    result["pinyin"] = _sentence_pinyin(words)
-    levels = [lex.hsk_level for lex in lex_by_id.values() if lex.hsk_level]
-    result["hsk"] = {
-        "level": max(levels) if levels else None,
-        "offlist": [
-            lex.simplified for lex in lex_by_id.values()
-            if lex.hsk_level is None and lex.is_dict
-        ],
-    }
 
-    artifact = AiArtifact(
-        target_kind="sentence", target_id=sentence.id, artifact_type="explanation",
-        provider="claude-cli", model=settings.ai_model,
-        prompt_version=EXPLAIN_PROMPT_VERSION, input_hash=input_hash,
-        output=result,
-    )
-    session.add(artifact)
-    session.commit()
-    return artifact
+def _explain(session: Session, sentence: Sentence, artifact_type: str, prompt: str, required_key: str) -> AiArtifact:
+    """Cached, single-flight AI explanation half; the cache key is the zh text,
+    so re-ingested episodes reuse explanations for unchanged sentences. The AI
+    is grounded on the app's own tokenization; pinyin/HSK/POS/glosses are
+    merged in from the analysis + lexicon rather than generated."""
+    input_hash = hashlib.sha256(sentence.zh.encode()).hexdigest()[:16]
+    cached = _cached_artifact(session, artifact_type, input_hash)
+    if cached is not None:
+        return cached
+
+    with _flight_lock(f"{artifact_type}:{input_hash}"):
+        cached = _cached_artifact(session, artifact_type, input_hash)  # won the wait, not the race
+        if cached is not None:
+            return cached
+
+        words, zh_tokens, lex_by_id = _explain_context(session, sentence)
+        en_line = f"Track translation (context, may be loose): {sentence.en}\n" if sentence.en else ""
+        result = provider.complete_json(
+            prompt.format(
+                zh=sentence.zh,
+                tokens=" | ".join(w["t"] for w in zh_tokens) or sentence.zh,
+                en_line=en_line,
+            ),
+            timeout_s=180,
+        )
+        if not isinstance(result, dict) or required_key not in result:
+            raise RuntimeError(f"malformed explanation payload: {str(result)[:200]}")
+
+        if artifact_type == "explanation":
+            result["words"] = _merge_breakdown(result.get("words") or [], zh_tokens, lex_by_id)
+            result["pinyin"] = _sentence_pinyin(words)
+            levels = [lex.hsk_level for lex in lex_by_id.values() if lex.hsk_level]
+            result["hsk"] = {
+                "level": max(levels) if levels else None,
+                "offlist": [
+                    lex.simplified for lex in lex_by_id.values()
+                    if lex.hsk_level is None and lex.is_dict
+                ],
+            }
+        else:
+            for ex in (result.get("pattern") or {}).get("examples") or []:
+                if ex.get("zh"):
+                    ex["py"] = _tts_pinyin(ex["zh"])
+            for var in result.get("variations") or []:
+                if var.get("zh"):
+                    var["py"] = _tts_pinyin(var["zh"])
+
+        artifact = AiArtifact(
+            target_kind="sentence", target_id=sentence.id, artifact_type=artifact_type,
+            provider="claude-cli", model=settings.ai_model,
+            prompt_version=EXPLAIN_PROMPT_VERSION, input_hash=input_hash,
+            output=result,
+        )
+        session.add(artifact)
+        session.commit()
+        return artifact
+
+
+def explain_sentence(session: Session, sentence: Sentence) -> AiArtifact:
+    return _explain(session, sentence, "explanation", EXPLAIN_CORE_PROMPT, "natural")
+
+
+def explain_sentence_extras(session: Session, sentence: Sentence) -> AiArtifact:
+    return _explain(session, sentence, "explanation_extras", EXPLAIN_EXTRAS_PROMPT, "pattern")
 
 
 def translate_item(session: Session, item_id: int, progress=lambda msg: None) -> dict:

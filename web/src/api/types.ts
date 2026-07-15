@@ -23,19 +23,27 @@ export interface SentenceOut {
   words: Word[];
 }
 
-export interface ExplainResult {
+// The explanation arrives in two parallel halves: core (renders first) and
+// extras (fills in below). Both cached server-side per zh text.
+export interface ExplainCore {
   natural: string;
   literal: string;
   structure: string;
   words: { zh: string; role: string; py?: string; hsk?: number; pos?: string; defs?: string[] }[];
   particles: { zh: string; note: string }[];
+  pinyin: string; // app-derived, not AI
+  hsk: { level: number | null; offlist: string[] }; // app-derived
+  provider: string;
+  model: string | null;
+  created_at: string;
+}
+
+export interface ExplainExtras {
   pronunciation: string[];
   nuance: string;
   variations: { zh: string; py?: string; note: string }[];
   pattern: { name: string; examples: { zh: string; py?: string; en: string }[] } | null;
   mistakes: string[];
-  pinyin: string; // app-derived, not AI
-  hsk: { level: number | null; offlist: string[] }; // app-derived
   provider: string;
   model: string | null;
   created_at: string;

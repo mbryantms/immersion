@@ -111,10 +111,7 @@ def test_explain_caches_by_input_hash(client, db_session, seeded, monkeypatch): 
         return {
             "natural": "Hello.", "literal": "hello", "structure": "greeting",
             "words": [{"zh": "你好", "role": "greeting"}],
-            "particles": [], "pronunciation": [], "nuance": "",
-            "variations": [{"zh": "您好", "note": "formal"}],
-            "pattern": {"name": "greeting", "examples": [{"zh": "你好吗", "en": "How are you?"}]},
-            "mistakes": [],
+            "particles": [],
         }
 
     monkeypatch.setattr(provider, "available", lambda: True)
@@ -127,11 +124,32 @@ def test_explain_caches_by_input_hash(client, db_session, seeded, monkeypatch): 
     assert body["model"]
     assert body["pinyin"]  # derived from analysis, not the AI
     assert "level" in body["hsk"]
-    assert body["pattern"]["examples"][0]["py"].startswith("nǐ")  # deterministic pinyin attached
-    assert body["variations"][0]["py"]
     second = client.post(f"/api/sentences/{seeded['sentence']}/explain")
     assert second.status_code == 200
     assert calls["n"] == 1  # second hit served from ai_artifact
+
+
+def test_explain_extras_cached_separately(client, seeded, monkeypatch):  # noqa: F811
+    from app.ai import provider
+
+    calls = {"n": 0}
+
+    def fake_complete(prompt: str, timeout_s: int = 0):
+        calls["n"] += 1
+        return {
+            "pronunciation": [], "nuance": "", "mistakes": [],
+            "variations": [{"zh": "您好", "note": "formal"}],
+            "pattern": {"name": "greeting", "examples": [{"zh": "你好吗", "en": "How are you?"}]},
+        }
+
+    monkeypatch.setattr(provider, "available", lambda: True)
+    monkeypatch.setattr(provider, "complete_json", fake_complete)
+
+    body = client.post(f"/api/sentences/{seeded['sentence']}/explain-extras").json()
+    assert body["pattern"]["examples"][0]["py"].startswith("nǐ")  # deterministic pinyin attached
+    assert body["variations"][0]["py"]
+    client.post(f"/api/sentences/{seeded['sentence']}/explain-extras")
+    assert calls["n"] == 1
 
 
 def test_explain_unavailable_is_503(client, seeded, monkeypatch):  # noqa: F811

@@ -69,25 +69,38 @@ def get_sentences(item_id: int, session: Session = Depends(get_session)):
     }
 
 
-@router.post("/sentences/{sentence_id}/explain")
-def explain(sentence_id: int, session: Session = Depends(get_session)):
-    """AI explanation (cached per zh text + prompt version). Runs the provider
-    synchronously — seconds, not the job queue; provenance travels with it."""
+def _explain_response(session: Session, sentence_id: int, task) -> dict:
+    """Shared shell for the two explanation halves (cached per zh text +
+    prompt version; single-flight so a prefetch and a click coalesce). Runs
+    the provider synchronously — seconds, not the job queue."""
     from ..ai import provider
-    from ..ai.tasks import explain_sentence
 
     sentence = session.get(Sentence, sentence_id)
     if sentence is None:
         raise HTTPException(404)
     if not provider.available():
         raise HTTPException(503, "AI provider unavailable (claude CLI not on PATH)")
-    artifact = explain_sentence(session, sentence)
+    artifact = task(session, sentence)
     return {
         **artifact.output,
         "provider": artifact.provider,
         "model": artifact.model,
         "created_at": artifact.created_at,
     }
+
+
+@router.post("/sentences/{sentence_id}/explain")
+def explain(sentence_id: int, session: Session = Depends(get_session)):
+    from ..ai.tasks import explain_sentence
+
+    return _explain_response(session, sentence_id, explain_sentence)
+
+
+@router.post("/sentences/{sentence_id}/explain-extras")
+def explain_extras(sentence_id: int, session: Session = Depends(get_session)):
+    from ..ai.tasks import explain_sentence_extras
+
+    return _explain_response(session, sentence_id, explain_sentence_extras)
 
 
 class LookupIn(BaseModel):

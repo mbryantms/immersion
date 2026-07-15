@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { post } from "../api/client";
 import {
   patchTrackOffset,
+  prefetchExplain,
   queueTranscribe,
   saveProgress,
   useItem,
@@ -58,6 +59,7 @@ export default function WatchPage() {
   const [nudgeHidden, setNudgeHidden] = useState(true);
   const [transcribeQueued, setTranscribeQueued] = useState(false);
   const sessionLookups = useRef<Map<number, SessionLookup>>(new Map());
+  const prefetchedExplains = useRef<Set<number>>(new Set());
   const playedSeconds = useRef(0);
   const subOffsetRef = useRef<number | null>(null); // local echo until refetch
   const [subOffset, setSubOffset] = useState<number | null>(null);
@@ -198,6 +200,12 @@ export default function WatchPage() {
           pinyin: word.py?.join(" "),
           sentenceId: sentence.id,
         });
+      }
+      // a lookup is a confusion signal: warm the explanation cache so a
+      // follow-up Explain click lands on (or joins) an in-flight generation
+      if (!prefetchedExplains.current.has(sentence.id)) {
+        prefetchedExplains.current.add(sentence.id);
+        prefetchExplain(sentence.id);
       }
       setGloss({ sentence, word });
     },

@@ -221,7 +221,20 @@ export const resetLexemeStats = (lexemeId: number) =>
   del<{ lexeme_id: number; reset: boolean }>(`/lexemes/${lexemeId}/stats`);
 
 export const explainSentence = (sentenceId: number) =>
-  post<import("./types").ExplainResult>(`/sentences/${sentenceId}/explain`);
+  post<import("./types").ExplainCore>(`/sentences/${sentenceId}/explain`);
+
+export const explainSentenceExtras = (sentenceId: number) =>
+  post<import("./types").ExplainExtras>(`/sentences/${sentenceId}/explain-extras`);
+
+/** Fire-and-forget warmup: start generating the explanation so a later
+ *  Explain click lands on the cache (or joins the in-flight call). Core
+ *  first, extras chained after — parallel calls share one provider token
+ *  budget and finish later than back-to-back. */
+export const prefetchExplain = (sentenceId: number) => {
+  explainSentence(sentenceId)
+    .catch(() => {})
+    .finally(() => explainSentenceExtras(sentenceId).catch(() => {}));
+};
 
 export const patchTrackOffset = (trackId: number, offsetMs: number) =>
   patch<{ id: number; offset_ms: number }>(`/tracks/${trackId}`, { offset_ms: offsetMs });
