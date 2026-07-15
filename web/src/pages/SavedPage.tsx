@@ -156,7 +156,7 @@ function SavedRow({ item, checked, onCheck, onRemove }: { item: SavedItemOut; ch
                 <ul className="mt-2 space-y-2">
                   {item.contexts.map((context, index) => (
                     <li key={index} className="rounded-lg bg-muted/30 px-3 py-2">
-                      {context.zh && <p className="font-zh text-sm leading-relaxed text-foreground/90">{context.zh}</p>}
+                      {context.zh && <p className="font-zh text-base leading-relaxed text-foreground/90">{context.zh}</p>}
                       {context.en && <p className="mt-0.5 text-xs text-muted-foreground">{context.en}</p>}
                       <div className="mt-1.5 flex flex-wrap items-center gap-2">
                         {context.item_id && <Link to={`/watch/${context.item_id}${context.t0_ms != null ? `?t=${context.t0_ms}` : ""}`} className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">{context.item_title ?? "Open source"}<ExternalLink className="size-3" /></Link>}

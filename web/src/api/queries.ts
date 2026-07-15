@@ -26,8 +26,9 @@ export const useItem = (id: number) =>
 export const useSentences = (itemId: number) =>
   useQuery({
     queryKey: ["sentences", itemId],
-    queryFn: () => get<{ item_id: number; sentences: SentenceOut[] }>(`/items/${itemId}/sentences`),
-    staleTime: Infinity, // immutable per content revision
+    queryFn: () => get<{ item_id: number; zh_offset_ms: number; sentences: SentenceOut[] }>(
+      `/items/${itemId}/sentences`),
+    staleTime: Infinity, // immutable per content revision (server also ETags it)
   });
 
 export const useKnowledge = (itemId: number) =>
@@ -171,7 +172,7 @@ export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | 
 export const useRecommendations = () =>
   useQuery({
     queryKey: ["recommendations"],
-    queryFn: () => get<{ band: { low: number; high: number }; items: import("./types").Recommendation[] }>("/recommendations"),
+    queryFn: () => get<{ band: { low: number; high: number }; fallback: boolean; items: import("./types").Recommendation[] }>("/recommendations"),
     staleTime: 5 * 60_000, // coverage moves slowly; don't recompute per visit
   });
 

@@ -209,7 +209,7 @@ export default function DictationPanel({
 
               {result && (
                 <div className="mt-2 pl-10">
-                  <p className="font-zh text-[15px] leading-relaxed">
+                  <p className="font-zh text-base leading-relaxed">
                     {result.segments.map((seg, i) =>
                       seg.kind === "ok" ? (
                         <span key={i} className="text-stone-200">{seg.text}</span>

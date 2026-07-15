@@ -82,7 +82,7 @@ export default function Controls(p: Props) {
   const progress = dur ? (time / dur) * 100 : 0;
   const bufferedProgress = dur ? Math.min(100, (buffered / dur) * 100) : 0;
   const iconButton =
-    "control-button flex size-9 shrink-0 items-center justify-center rounded-full text-stone-300 transition hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-400";
+    "control-button flex size-10 shrink-0 items-center justify-center rounded-full text-stone-300 transition hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-400";
   const learningButton = (on: boolean) =>
     `learning-toggle ${on ? "is-active" : ""}`;
 

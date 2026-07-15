@@ -162,10 +162,19 @@ def recommendations(session: Session = Depends(get_session)):
         for i in candidates
         if i.id in cov and LOW <= cov[i.id]["coverage"] <= HIGH
     ]
+    fallback = not scored
+    if fallback:
+        # cold start: nothing reaches the band yet (young knowledge base) —
+        # the most-familiar unfinished items are still the best next input
+        scored = [
+            (1 - cov[i.id]["coverage"], i, cov[i.id])
+            for i in candidates if i.id in cov
+        ]
     scored.sort(key=lambda t: (t[0], t[1].series_id or 0, t[1].ordinal or 0))
     series_titles = {s.id: s.title for s in session.scalars(select(Series))}
     return {
         "band": {"low": LOW, "high": HIGH},
+        "fallback": fallback,
         "items": [
             {
                 "item_id": i.id, "title": i.title, "kind": i.kind,

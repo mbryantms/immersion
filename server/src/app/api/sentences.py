@@ -6,9 +6,11 @@ never invalidates the transcript cache."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import hashlib
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
@@ -41,20 +43,60 @@ def _anki_matches(session: Session, rows: list[Sentence]) -> set[int]:
     return hits
 
 
+def _slim_words(analysis: dict | None) -> list[dict]:
+    """Trim inline CEDICT glosses to one sense / two defs: full glosses are
+    ~60% of the payload, but the gloss sheet only needs an instant placeholder
+    until /lexemes/{id} returns the real entry."""
+    out = []
+    for w in (analysis or {}).get("words", []):
+        gloss = w.get("gloss")
+        if gloss:
+            first = gloss[0]
+            w = {**w, "gloss": [{"py": first.get("py"), "defs": (first.get("defs") or [])[:2]}]}
+        out.append(w)
+    return out
+
+
 @router.get("/items/{item_id}/sentences")
-def get_sentences(item_id: int, session: Session = Depends(get_session)):
+def get_sentences(
+    item_id: int,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+):
     if session.get(MediaItem, item_id) is None:
         raise HTTPException(404)
-    rows = session.scalars(
-        select(Sentence).where(Sentence.item_id == item_id).order_by(Sentence.ordinal)
-    ).all()
     # user-set per-track sync nudge shifts display timing; cue times stay pristine
     offsets = dict(session.execute(
         select(TextTrack.id, TextTrack.offset_ms).where(TextTrack.item_id == item_id)
     ).all())
+
+    # the payload is immutable per (content revision, offsets, anki import) —
+    # a cheap ETag turns every reopen into a 304 instead of a re-download
+    max_id, n = session.execute(
+        select(func.max(Sentence.id), func.count()).where(Sentence.item_id == item_id)
+    ).one()
+    from ..models import Setting
+
+    anki_stamp = session.get(Setting, "anki_last_import")
+    stamp = ((anki_stamp.value or {}) if anki_stamp else {}).get("at", "")
+    etag = 'W/"' + hashlib.sha1(
+        f"{item_id}:{max_id}:{n}:{sorted(offsets.items())}:{stamp}".encode()
+    ).hexdigest()[:20] + '"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "private, no-cache"  # cache, but revalidate
+
+    rows = session.scalars(
+        select(Sentence).where(Sentence.item_id == item_id).order_by(Sentence.ordinal)
+    ).all()
     in_anki = _anki_matches(session, rows)
     return {
         "item_id": item_id,
+        # the offset baked into these times; the client shifts live nudges
+        # relative to this instead of refetching the whole transcript
+        "zh_offset_ms": offsets.get(rows[0].track_id, 0) if rows else 0,
         "sentences": [
             {
                 "id": s.id, "ord": s.ordinal, "zh": s.zh, "tr": s.trad,
@@ -62,7 +104,7 @@ def get_sentences(item_id: int, session: Session = Depends(get_session)):
                 "t1": max(0, s.t1_ms + offsets.get(s.track_id, 0)),
                 "en": s.en, "conf": s.align_conf,
                 "anki": s.id in in_anki or None,
-                "words": (s.analysis or {}).get("words", []),
+                "words": _slim_words(s.analysis),
             }
             for s in rows
         ],

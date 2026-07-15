@@ -103,7 +103,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
                   {result.words.map((word, i) => (
                     <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
                       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-                        <span className="font-zh text-[15px] text-teal-200">{word.zh}</span>
+                        <span className="font-zh text-base text-teal-200">{word.zh}</span>
                         {word.py && <span className="text-[11px] text-stone-500">{word.py}</span>}
                         {word.pos && <span className="text-[10px] uppercase tracking-wide text-stone-600">{posLabel(word.pos)}</span>}
                         {word.hsk && <span className="text-[10px] text-teal-500/80">HSK {word.hsk}</span>}
@@ -123,7 +123,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
                 <div className="space-y-1">
                   {result.particles.map((particle, i) => (
                     <div key={i} className="flex items-baseline gap-3 rounded-lg bg-white/3 px-3 py-2">
-                      <span className="font-zh shrink-0 text-[15px] text-violet-300">{particle.zh}</span>
+                      <span className="font-zh shrink-0 text-base text-violet-300">{particle.zh}</span>
                       <span className="text-xs leading-relaxed text-stone-400">{particle.note}</span>
                     </div>
                   ))}
@@ -158,7 +158,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
                     <div className="space-y-1">
                       {extras.variations.map((variation, i) => (
                         <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
-                          <p className="font-zh text-[15px] text-stone-100">{variation.zh}</p>
+                          <p className="font-zh text-base text-stone-100">{variation.zh}</p>
                           <p className="text-[11px] text-stone-500">{variation.py}</p>
                           <p className="mt-0.5 text-xs text-stone-400">{variation.note}</p>
                         </div>
@@ -172,7 +172,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
                     <div className="space-y-1">
                       {extras.pattern.examples.map((example, i) => (
                         <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
-                          <p className="font-zh text-[15px] text-stone-100">{example.zh}</p>
+                          <p className="font-zh text-base text-stone-100">{example.zh}</p>
                           <p className="text-[11px] text-stone-500">{example.py}</p>
                           <p className="mt-0.5 text-xs text-stone-400">{example.en}</p>
                         </div>

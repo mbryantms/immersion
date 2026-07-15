@@ -93,7 +93,18 @@ export default function ReviewPage() {
 
   const context = current.context;
   const dictation = current.mode === "dictation";
+  const cloze = !dictation && !!context && !!current.surface && context.zh.includes(current.surface);
   const result = dictation && revealed && context ? scoreAttempt(context.zh, typed) : null;
+  const wordInfo = cloze
+    ? context.words.find((w) => w.type === "zh" && w.t === current.surface)
+    : undefined;
+  const wordCorrect = cloze && revealed
+    ? answerMatches(typed, current.surface!, wordInfo?.tr, wordInfo?.py?.join(""))
+    : null;
+  // auto-graded verdict; the learner can still override
+  const verdict = dictation
+    ? (result ? result.score >= PASS_SCORE : null)
+    : wordCorrect;
   const progress = items.length ? ((position + 1) / items.length) * 100 : 0;
 
   return (
@@ -112,7 +123,16 @@ export default function ReviewPage() {
         {context?.stream_url && <audio ref={audioRef} src={context.stream_url} preload="auto" />}
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
-            <div><CardTitle>{dictation ? "Write what you hear" : "Retrieve the meaning"}</CardTitle><CardDescription>{dictation ? "Listen first. Punctuation and spacing are ignored." : "What does the highlighted word mean in this sentence?"}</CardDescription></div>
+            <div>
+              <CardTitle>{dictation ? "Write what you hear" : cloze ? "Fill in the missing word" : "Retrieve the meaning"}</CardTitle>
+              <CardDescription>
+                {dictation
+                  ? "Listen first. Punctuation and spacing are ignored."
+                  : cloze
+                    ? "Type the word that belongs in the blank — hanzi or pinyin"
+                    : "What does this word mean?"}
+              </CardDescription>
+            </div>
             {context?.stream_url && <Button variant="secondary" size="icon-lg" className="shrink-0 rounded-full" onClick={play} aria-label="Replay audio"><Volume2 /></Button>}
           </div>
         </CardHeader>
@@ -126,6 +146,31 @@ export default function ReviewPage() {
               </div>
               {result && context && <div className="rounded-xl border border-border bg-muted/25 p-4"><div className="mb-2 flex items-center gap-2"><Badge className={result.score >= PASS_SCORE ? "bg-emerald-400/15 text-emerald-300" : "bg-amber-400/15 text-amber-300"}>{Math.round(result.score * 100)}% match</Badge></div><p className="font-zh text-xl text-foreground">{context.zh}</p>{context.en && <p className="mt-1 text-sm text-muted-foreground">{context.en}</p>}</div>}
             </div>
+          ) : cloze && context ? (
+            <div className="space-y-4">
+              <p className="font-zh text-2xl leading-relaxed text-foreground sm:text-3xl">
+                {revealed ? highlight(context.zh, current.surface) : blank(context.zh, current.surface!)}
+              </p>
+              {!revealed && (
+                <div className="flex gap-2">
+                  <Input lang="zh-CN" value={typed} onChange={(event) => setTyped(event.target.value)} onKeyDown={(event) => event.key === "Enter" && !event.nativeEvent.isComposing && setRevealed(true)} placeholder="缺的词…" className="h-12 bg-background/40 font-zh text-lg" autoFocus />
+                  <Button className="h-12" onClick={() => setRevealed(true)} disabled={!typed}>Check</Button>
+                  <Button className="h-12" variant="ghost" onClick={() => { setTyped(""); setRevealed(true); }}>Don't know</Button>
+                </div>
+              )}
+              {revealed && (
+                <div className="rounded-xl border border-border bg-muted/25 p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Badge className={wordCorrect ? "bg-emerald-400/15 text-emerald-300" : "bg-amber-400/15 text-amber-300"}>
+                      {wordCorrect ? "Correct" : typed ? `You wrote: ${typed}` : "Revealed"}
+                    </Badge>
+                    <span className="font-zh text-lg text-foreground">{current.surface}</span>
+                    {wordInfo?.py && <span className="text-sm text-muted-foreground">{wordInfo.py.join("")}</span>}
+                  </div>
+                  {context.en && <p className="text-sm text-muted-foreground">{context.en}</p>}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center py-8 text-center">
               {context ? <p className="font-zh text-2xl leading-relaxed text-foreground sm:text-3xl">{highlight(context.zh, current.surface)}</p> : <p className="font-zh text-4xl text-foreground">{current.surface}</p>}
@@ -134,12 +179,23 @@ export default function ReviewPage() {
             </div>
           )}
 
-          {(revealed || dictation) && (
+          {revealed && verdict !== null ? (
+            // objective modes: the verdict is computed; Continue submits it,
+            // the ghost button lets the learner overrule an unfair grade
+            <div className="mt-auto flex items-center gap-3 border-t border-border pt-5">
+              <Button size="lg" className="flex-1" onClick={() => void grade(verdict ? "pass" : "fail", result?.score)}>
+                {verdict ? <Check /> : <CircleX />}Continue
+              </Button>
+              <Button size="lg" variant="ghost" className="text-muted-foreground" onClick={() => void grade(verdict ? "fail" : "pass", result?.score)}>
+                {verdict ? "Actually missed it" : "I did know it"}
+              </Button>
+            </div>
+          ) : revealed || dictation ? (
             <div className="mt-auto grid grid-cols-2 gap-3 border-t border-border pt-5">
               <Button size="lg" variant="secondary" className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={dictation && !revealed} onClick={() => void grade("fail", result?.score)}><CircleX />Not yet</Button>
               <Button size="lg" disabled={dictation && !revealed} onClick={() => void grade("pass", result?.score)}><Check />Got it</Button>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
       <p className="text-center text-xs text-muted-foreground">Review is intentionally short. Passing items move toward Anki; misses return with fresh context.</p>
@@ -151,4 +207,28 @@ function highlight(zh: string, surface: string | null) {
   if (!surface || !zh.includes(surface)) return zh;
   const [before, ...rest] = zh.split(surface);
   return <>{before}<mark className="rounded-md bg-primary/15 px-1 text-primary">{surface}</mark>{rest.join(surface)}</>;
+}
+
+function blank(zh: string, surface: string) {
+  const [before, ...rest] = zh.split(surface);
+  return (
+    <>
+      {before}
+      <span className="mx-0.5 rounded-md border border-dashed border-primary/40 bg-primary/5 px-1.5 tracking-widest text-primary/60">
+        {"＿".repeat(Math.max(2, surface.length))}
+      </span>
+      {rest.join(surface)}
+    </>
+  );
+}
+
+/** Accept the exact word (simplified or traditional) or its toneless pinyin. */
+function answerMatches(typed: string, surface: string, trad?: string, pinyinMarks?: string): boolean {
+  const cleaned = typed.replace(/\s+/g, "").trim();
+  if (!cleaned) return false;
+  if (/[㐀-鿿]/.test(cleaned)) return cleaned === surface || (!!trad && cleaned === trad);
+  if (!pinyinMarks) return false;
+  const strip = (s: string) =>
+    s.normalize("NFD").replace(/\p{M}/gu, "").replace(/['\s·]/g, "").toLowerCase();
+  return strip(cleaned) === strip(pinyinMarks);
 }

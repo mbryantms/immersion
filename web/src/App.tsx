@@ -106,8 +106,10 @@ export default function App() {
         </ErrorBoundary>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden" aria-label="Mobile navigation">
-          <div className="mx-auto grid h-16 max-w-lg grid-cols-5 px-1.5">
+          <div className="mx-auto grid h-16 max-w-lg grid-cols-6 px-1.5">
             {primaryNav.map((item) => <MobileNavItem key={item.to} item={item} />)}
+            {/* Settings was reachable only via a 28px header icon on phones */}
+            <MobileNavItem item={{ to: "/settings", label: "Settings", icon: Settings }} />
           </div>
         </nav>
       </div>

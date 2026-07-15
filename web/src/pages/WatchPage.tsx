@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -43,13 +42,11 @@ export default function WatchPage() {
   const { data: item, isError: itemError, refetch: refetchItem } = useItem(id);
   const { data: sentData } = useSentences(id);
   const { data: knowledgeData } = useKnowledge(id);
-  const sentences = useMemo(() => sentData?.sentences ?? [], [sentData]);
   const knowledge = knowledgeData?.states ?? {};
   const savedLexemes = useMemo(() => new Set(knowledgeData?.saved ?? []), [knowledgeData]);
 
   const isAudio = item?.kind === "audio";
   const prefs = usePrefs();
-  const qc = useQueryClient();
   const [loop, setLoop] = useState(false);
   const [dictation, setDictation] = useState(false);
   const [gloss, setGloss] = useState<GlossTarget | null>(null);
@@ -63,8 +60,18 @@ export default function WatchPage() {
   const sessionLookups = useRef<Map<number, SessionLookup>>(new Map());
   const prefetchedExplains = useRef<Set<number>>(new Set());
   const playedSeconds = useRef(0);
-  const subOffsetRef = useRef<number | null>(null); // local echo until refetch
+  const subOffsetRef = useRef<number | null>(null); // survives rapid keypresses
   const [subOffset, setSubOffset] = useState<number | null>(null);
+
+  // live sync nudges shift cue times client-side against the offset the
+  // payload was baked with — no transcript refetch per keypress
+  const zhTrackEarly = item?.tracks.find((t) => t.lang === "zh" && t.selected);
+  const offsetDelta = (subOffset ?? zhTrackEarly?.offset_ms ?? 0) - (sentData?.zh_offset_ms ?? 0);
+  const sentences = useMemo(() => {
+    const raw = sentData?.sentences ?? [];
+    if (!offsetDelta) return raw;
+    return raw.map((s) => ({ ...s, t0: Math.max(0, s.t0 + offsetDelta), t1: Math.max(0, s.t1 + offsetDelta) }));
+  }, [sentData, offsetDelta]);
 
   const { idx, visible, autoPaused, resume, armSentence, syncToTime } = useSentenceClock(videoRef, sentences, {
     pauseAfter: prefs.pauseAfter,
@@ -108,22 +115,17 @@ export default function WatchPage() {
   }, [item, isAudio]);
 
   // ---- subtitle sync offset (,/. keys) -------------------------------------
-  const zhTrack = item?.tracks.find((t) => t.lang === "zh" && t.selected);
+  const zhTrack = zhTrackEarly;
   const shownOffset = subOffset ?? zhTrack?.offset_ms ?? 0;
   const nudgeSubs = useCallback(
     (delta: number) => {
       if (!zhTrack) return;
       const next = Math.max(-30_000, Math.min(30_000, (subOffsetRef.current ?? zhTrack.offset_ms) + delta));
       subOffsetRef.current = next;
-      setSubOffset(next);
-      patchTrackOffset(zhTrack.id, next)
-        .then(() => {
-          qc.invalidateQueries({ queryKey: ["sentences", id] });
-          qc.invalidateQueries({ queryKey: ["item", id] });
-        })
-        .catch(() => {});
+      setSubOffset(next); // applied client-side via offsetDelta; PATCH just persists
+      patchTrackOffset(zhTrack.id, next).catch(() => toast.error("Offset not saved — server unreachable"));
     },
-    [zhTrack, id, qc],
+    [zhTrack],
   );
 
   // ---- resume + progress persistence -------------------------------------

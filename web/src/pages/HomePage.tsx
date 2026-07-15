@@ -99,8 +99,10 @@ export default function HomePage() {
       {!!recs?.items.length && (
         <section>
           <SectionHeader
-            title="In your sweet spot"
-            description={`Episodes ${Math.round(recs.band.low * 100)}–${Math.round(recs.band.high * 100)}% familiar — hard enough to grow on, easy enough to follow`}
+            title={recs.fallback ? "Closest to your level" : "In your sweet spot"}
+            description={recs.fallback
+              ? "Your most familiar unfinished episodes — the sweet-spot picks sharpen as your known words grow"
+              : `Episodes ${Math.round(recs.band.low * 100)}–${Math.round(recs.band.high * 100)}% familiar — hard enough to grow on, easy enough to follow`}
           />
           <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
             {recs.items.map((rec) => (

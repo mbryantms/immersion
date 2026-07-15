@@ -125,7 +125,10 @@ button:not(:disabled), summary, input[type="range"] {
 .tones .t5 { color: var(--tone-5); }
 
 /* token knowledge-state accents (subtle; meaning stays primary) */
-.w { cursor: pointer; border-radius: 4px; transition: background-color 140ms ease, box-shadow 140ms ease; }
+.w { cursor: pointer; border-radius: 4px; transition: background-color 140ms ease, box-shadow 140ms ease; position: relative; }
+/* Words are the app's central tap target but a single hanzi is ~19px square —
+   extend the hit area beyond the ink without changing layout. */
+.w::after { content: ""; position: absolute; inset: -6px -3px; }
 /* Non-word tokens (punctuation). Full-width CJK punctuation glyphs carry
    ~half an em of designed-in blank, which reads as stray spaces between
    words. `halt` swaps in half-width-advance alternates (Noto CJK, PingFang);
@@ -364,7 +367,7 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
 
 .episode-nav {
   display: flex;
-  width: 36px;
+  width: 44px; /* touch minimum */
   height: 44px;
   align-items: center;
   justify-content: center;
