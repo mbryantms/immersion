@@ -1,7 +1,7 @@
 import type { KnowledgeStateName, SentenceOut, Word } from "../api/types";
 import { Token } from "../gloss/Token";
 import type { SubtitleMode } from "../lib/prefs";
-import { trimTokens } from "../lib/tokens";
+import { endPunctTrimClass, trimTokens } from "../lib/tokens";
 
 interface Props {
   sentence: SentenceOut | null;
@@ -32,6 +32,7 @@ export default function SubtitleOverlay({
 }: Props) {
   if (!sentence || !visible || mode === "off") return null;
   const words = trimTokens(sentence.words);
+  const endTrim = endPunctTrimClass(words); // compensated only under html.no-halt
   const showEn = (mode === "dual" || enRevealed) && sentence.en;
   const scale = Math.max(0.75, Math.min(1.5, fontScale));
   const chineseSize = `clamp(${1.125 * scale}rem, calc(${0.8 * scale}rem + ${1.45 * scale}cqi), ${2 * scale}rem)`;
@@ -43,7 +44,7 @@ export default function SubtitleOverlay({
         key={`zh-${sentence.id}`}
         lang="zh-CN"
         aria-label={sentence.zh}
-        className={`subtitle-primary pointer-events-auto font-zh ${toneColors ? "tones" : ""}`}
+        className={`subtitle-primary pointer-events-auto font-zh ${toneColors ? "tones" : ""} ${endTrim ?? ""}`}
         style={{ fontSize: chineseSize }}
         data-sentence-id={sentence.id}
       >

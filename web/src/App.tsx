@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingPage } from "@/components/layout/Page";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { updateHaltSupport } from "./lib/haltSupport";
 import { ZH_FONTS, usePrefs } from "./lib/prefs";
 
 const HomePage = lazy(() => import("./pages/HomePage"));
@@ -50,7 +51,9 @@ const utilityNav: NavItem[] = [
 export default function App() {
   const zhFont = usePrefs((p) => p.zhFont);
   useEffect(() => {
-    document.documentElement.style.setProperty("--font-zh", (ZH_FONTS[zhFont] ?? ZH_FONTS.sans).stack);
+    const stack = (ZH_FONTS[zhFont] ?? ZH_FONTS.sans).stack;
+    document.documentElement.style.setProperty("--font-zh", stack);
+    void updateHaltSupport(stack);
   }, [zhFont]);
 
   return (

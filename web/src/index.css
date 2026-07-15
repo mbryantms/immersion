@@ -190,6 +190,15 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Fonts without `halt` keep the designed-in blank after full-width
+   punctuation (PingFang/Kaiti on iOS — html.no-halt is set by a runtime
+   measurement, lib/haltSupport.ts), so a line ending in 。or ” looks like it
+   ends in a space. Compensate on the pill's own padding — negative margins on
+   tokens corrupt fit-content sizing and make text-wrap: balance wrap lines
+   that fit. Base padding-right is 0.72em. */
+.no-halt .subtitle-primary.end-trim-full { padding-right: 0.22em; }
+.no-halt .subtitle-primary.end-trim-half { padding-right: 0.47em; }
+
 .subtitle-primary .w:active {
   background: rgb(255 255 255 / 0.16);
   box-shadow: 0 0 0 0.12em rgb(255 255 255 / 0.08);
@@ -434,6 +443,10 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
     line-height: 1.48;
     letter-spacing: 0;
   }
+
+  /* narrow-stage padding-right is 0.58em; keep the no-halt trim proportional */
+  .no-halt .subtitle-primary.end-trim-full { padding-right: 0.08em; }
+  .no-halt .subtitle-primary.end-trim-half { padding-right: 0.33em; }
 
   .subtitle-translation {
     max-width: 96%;
