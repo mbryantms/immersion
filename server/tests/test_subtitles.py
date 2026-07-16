@@ -1,9 +1,10 @@
 from pathlib import Path
 
-from app.ingest.align_tracks import assign_en, dedupe_consecutive
+from app.ingest.align_tracks import assign_en
 from app.ingest.subtitles import (
     Cue,
     cjk_ratio,
+    dedupe_consecutive,
     parse_cues,
     segment_cues,
     sniff_read,
@@ -74,6 +75,59 @@ def test_dedupe_consecutive_en_paragraphs():
     out = dedupe_consecutive(cues)
     assert len(out) == 2
     assert out[0].t0_ms == 0 and out[0].t1_ms == 3000
+
+
+def test_dedupe_frame_sampled_zh():
+    # the other LFC pattern (Bird and Kip 1-48, Magic Marker): one on-screen
+    # line chopped into contiguous sub-second cues
+    cues = [
+        Cue(25858, 26148, "“我爱这棵树。”小鸟说。"),
+        Cue(26149, 26450, "“我爱这棵树。”小鸟说。"),
+        Cue(26451, 27239, "“我爱这棵树。”小鸟说。"),
+        Cue(27240, 29295, "“我爱这棵树。”小鸟说。"),
+    ]
+    out = dedupe_consecutive(cues)
+    assert len(out) == 1
+    assert (out[0].t0_ms, out[0].t1_ms) == (25858, 29295)
+    segs = segment_cues(out)
+    assert [s.text for s in segs] == ["“我爱这棵树。”小鸟说。"]
+
+
+def test_dedupe_incomplete_run_does_not_concatenate():
+    # duplicate cues without final punctuation must not merge into
+    # "phrase phrase phrase" via segment_cues
+    cues = dedupe_consecutive([
+        Cue(30438, 31475, "“这棵树在一个安静美好的公园里，"),
+        Cue(31476, 31745, "“这棵树在一个安静美好的公园里，"),
+        Cue(31746, 35442, "“这棵树在一个安静美好的公园里，"),
+        Cue(35443, 36030, "“这棵树在一个安静美好的公园里，"),
+        Cue(36031, 46034, "我还可以看到大海。”"),
+    ])
+    # the deduped run spans 15.6s, past MERGE_MAX_SPAN_MS — the two halves stay
+    # separate segments on their honest cue boundaries; what matters is the
+    # fragment appears once, not concatenated 4x
+    segs = segment_cues(cues)
+    assert [s.text for s in segs] == ["“这棵树在一个安静美好的公园里，", "我还可以看到大海。”"]
+    assert (segs[0].t0_ms, segs[0].t1_ms) == (30438, 36030)
+
+
+def test_dedupe_keeps_distant_repeats():
+    # a line genuinely repeated later (gap >= 2s) stays a separate cue
+    cues = [Cue(0, 1000, "哐！咚！"), Cue(5000, 6000, "哐！咚！")]
+    assert len(dedupe_consecutive(cues)) == 2
+
+
+def test_parse_cues_dedupes(tmp_path: Path):
+    srt = (
+        "1\n00:00:01,000 --> 00:00:01,500\n重复的句子。\n\n"
+        "2\n00:00:01,501 --> 00:00:02,000\n重复的句子。\n\n"
+        "3\n00:00:02,001 --> 00:00:03,000\n下一句。\n"
+    )
+    p = tmp_path / "dup.srt"
+    p.write_text(srt, encoding="utf-8")
+    cues, _ = parse_cues(p, "zh")
+    assert [c.text for c in cues] == ["重复的句子。", "下一句。"]
+    assert (cues[0].t0_ms, cues[0].t1_ms) == (1000, 2000)
 
 
 def test_assign_en_overlap():

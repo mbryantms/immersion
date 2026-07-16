@@ -18,6 +18,7 @@ CLOSERS = "”』」）)\"'"
 MERGE_MAX_GAP_MS = 500
 MERGE_MAX_CUES = 4
 MERGE_MAX_SPAN_MS = 12_000
+DEDUPE_MAX_GAP_MS = 2000
 
 
 @dataclass
@@ -88,7 +89,25 @@ def parse_cues(path: Path, lang: str) -> tuple[list[Cue], str]:
             continue
         cues.append(Cue(int(ev.start), int(ev.end), body))
     cues.sort(key=lambda c: (c.t0_ms, c.t1_ms))
-    return cues, encoding
+    return dedupe_consecutive(cues), encoding
+
+
+def dedupe_consecutive(cues: list[Cue], max_gap_ms: int = DEDUPE_MAX_GAP_MS) -> list[Cue]:
+    """Collapse runs of identical consecutive cues into one spanning cue.
+
+    Two LFC export quirks produce these: frame-sampled zh sidecars chop one
+    on-screen line into dozens of contiguous sub-second cues, and some English
+    sidecars copy the same paragraph translation across consecutive cues.
+    Without this, segment_cues turns the zh runs into repeated sentences —
+    or, when the run lacks final punctuation, one sentence with the text
+    concatenated several times over."""
+    out: list[Cue] = []
+    for c in cues:
+        if out and c.text == out[-1].text and c.t0_ms - out[-1].t1_ms < max_gap_ms:
+            out[-1] = Cue(out[-1].t0_ms, max(out[-1].t1_ms, c.t1_ms), c.text)
+        else:
+            out.append(Cue(c.t0_ms, c.t1_ms, c.text))
+    return out
 
 
 def _complete(text: str) -> bool:
