@@ -8,6 +8,7 @@ export interface Word {
   gloss?: { py: string; defs: string[] }[];
   lex?: number;
   tr?: string;
+  ne?: "person" | "place" | "org"; // NER proper-name tag
 }
 
 export interface SentenceOut {

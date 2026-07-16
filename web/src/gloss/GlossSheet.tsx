@@ -27,6 +27,16 @@ interface Props {
   onSetState: (lexemeId: number, state: KnowledgeStateName) => void;
 }
 
+// word.ne -> ICTCLAS tag (mirror of NE_POS on the server) so the POS chip and
+// name card render instantly, before /lexemes/{id} returns
+const NE_POS: Record<string, string> = { person: "nr", place: "ns", org: "nt" };
+
+const NAME_NOTE: Record<string, string> = {
+  nr: "A person's name in this story.",
+  ns: "A place name in this story.",
+  nt: "An organization's name in this story.",
+};
+
 function localInfo(word: Word, knowledge: Record<string, KnowledgeStateName>): LexemeInfo {
   return {
     lexeme_id: word.lex ?? -1,
@@ -35,6 +45,7 @@ function localInfo(word: Word, knowledge: Record<string, KnowledgeStateName>): L
     pinyin: null,
     hsk: null,
     is_dict: !!word.gloss,
+    pos: word.ne ? NE_POS[word.ne] : null,
     senses: (word.gloss ?? []).map((g) => ({ py: g.py, trad: null, defs: g.defs })),
     state: (word.lex && knowledge[word.lex]) || "new",
     state_source: null,
@@ -199,12 +210,19 @@ export default function GlossSheet({
                 </p>
               </div>
             ))}
-            {!c.senses.length && (
+            {!c.senses.length && (!c.is_dict && c.pos && NAME_NOTE[c.pos] ? (
+              <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center">
+                <p className="text-sm text-stone-300">{NAME_NOTE[c.pos]}</p>
+                <p className="mt-1 text-xs text-stone-600">
+                  Proper names aren't dictionary words — the pinyin shows the standard character readings.
+                </p>
+              </div>
+            ) : (
               <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center">
                 <p className="text-sm text-stone-400">No dictionary definition available.</p>
                 <p className="mt-1 text-xs text-stone-600">This may be a name or an out-of-vocabulary expression.</p>
               </div>
-            )}
+            ))}
           </div>
 
           <div className="mt-4 rounded-xl border border-white/7 bg-black/15 px-3.5 py-3">

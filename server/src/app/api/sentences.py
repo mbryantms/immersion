@@ -64,7 +64,8 @@ def get_sentences(
     response: Response,
     session: Session = Depends(get_session),
 ):
-    if session.get(MediaItem, item_id) is None:
+    item = session.get(MediaItem, item_id)
+    if item is None:
         raise HTTPException(404)
     # user-set per-track sync nudge shifts display timing; cue times stay pristine
     offsets = dict(session.execute(
@@ -72,7 +73,9 @@ def get_sentences(
     ).all())
 
     # the payload is immutable per (content revision, offsets, anki import) —
-    # a cheap ETag turns every reopen into a 304 instead of a re-download
+    # a cheap ETag turns every reopen into a 304 instead of a re-download;
+    # analysis_rev covers in-place reanalysis, which keeps sentence ids
+    rev = (item.meta or {}).get("analysis_rev", 0)
     max_id, n = session.execute(
         select(func.max(Sentence.id), func.count()).where(Sentence.item_id == item_id)
     ).one()
@@ -81,7 +84,7 @@ def get_sentences(
     anki_stamp = session.get(Setting, "anki_last_import")
     stamp = ((anki_stamp.value or {}) if anki_stamp else {}).get("at", "")
     etag = 'W/"' + hashlib.sha1(
-        f"{item_id}:{max_id}:{n}:{sorted(offsets.items())}:{stamp}".encode()
+        f"{item_id}:{max_id}:{n}:{rev}:{sorted(offsets.items())}:{stamp}".encode()
     ).hexdigest()[:20] + '"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304)

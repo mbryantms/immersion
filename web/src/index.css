@@ -138,6 +138,9 @@ button:not(:disabled), summary, input[type="range"] {
 .w.k-new { border-bottom: 2px solid rgb(56 189 248 / 0.65); }
 .w.k-learning { border-bottom: 2px solid rgb(251 191 36 / 0.65); }
 .w.k-ignored { opacity: 0.55; }
+/* 专名号 — the traditional proper-name mark; dotted so it never reads as a
+   knowledge-state underline */
+.w.nm { border-bottom: 1px dotted rgb(231 229 228 / 0.6); }
 /* saved = soft teal highlight: never collides with the knowledge underline */
 .w.saved { background: rgb(45 212 191 / 0.13); box-shadow: 0 0 0 0.06em rgb(45 212 191 / 0.06); }
 .w.saved:hover { background: rgb(45 212 191 / 0.22); }

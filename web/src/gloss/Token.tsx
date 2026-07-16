@@ -23,6 +23,9 @@ export const Token = memo(function Token({
 }: TokenProps) {
   if (word.type === "x") return <span className="x text-neutral-400">{word.t}</span>;
 
+  // OOV proper names (人名/地名 without a dictionary entry) carry the 专名号
+  // underline instead of a knowledge-state one — they're cast, not vocabulary.
+  const isName = !!word.ne && !word.gloss;
   const display = traditional && word.tr ? word.tr : word.t;
   const tones = word.tones ?? [];
   const py = word.py ?? [];
@@ -47,7 +50,7 @@ export const Token = memo(function Token({
       role="button"
       tabIndex={0}
       aria-label={`Look up ${display}`}
-      className={`w k-${state}${saved ? " saved" : ""}`}
+      className={`w ${isName ? "nm" : `k-${state}`}${saved ? " saved" : ""}`}
       onClick={(e) => {
         e.stopPropagation();
         onTap?.(word);

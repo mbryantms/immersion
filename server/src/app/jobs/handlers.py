@@ -56,6 +56,25 @@ def ingest_item_handler(session: Session, payload: dict, progress) -> dict:
     return {"item_id": payload["item_id"]}
 
 
+@handler("reanalyze_item")
+def reanalyze_item_handler(session: Session, payload: dict, progress) -> dict:
+    from ..ingest.analysis import reanalyze_item
+
+    return reanalyze_item(session, payload["item_id"], progress)
+
+
+@handler("reanalyze_all")
+def reanalyze_all(session: Session, payload: dict, progress) -> dict:
+    """In-place re-analysis of every item that has sentences (pipeline-change
+    backfill). Low priority: fresh ingests should never wait behind it."""
+    from ..models import Sentence
+
+    ids = sorted({i for (i,) in session.execute(select(Sentence.item_id).distinct())})
+    for item_id in ids:
+        enqueue(session, "reanalyze_item", {"item_id": item_id}, priority=-1)
+    return {"queued": len(ids)}
+
+
 @handler("whisper_align")
 def whisper_align(session: Session, payload: dict, progress) -> dict:
     from ..ingest.podcast import whisper_align_item

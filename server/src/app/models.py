@@ -134,6 +134,23 @@ class Lexeme(Base):
     freq_rank: Mapped[int | None] = mapped_column(Integer)  # 1 = most frequent (jieba counts)
 
 
+class SeriesName(Base):
+    """Per-series proper-name lexicon, aggregated from NER at ingest. Later
+    episodes inherit it (consistent tagging + repair of tokenizer splits);
+    also the future data source for a cast-list UI."""
+
+    __tablename__ = "series_name"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id"))
+    simplified: Mapped[str] = mapped_column(String)
+    label: Mapped[str] = mapped_column(String)  # person|place|org
+    count: Mapped[int] = mapped_column(Integer, default=0)  # peak per-ingest occurrences
+    __table_args__ = (
+        UniqueConstraint("series_id", "simplified"),
+        Index("ix_series_name_series", "series_id"),
+    )
+
+
 class Sense(Base):
     __tablename__ = "sense"
     id: Mapped[int] = mapped_column(primary_key=True)
