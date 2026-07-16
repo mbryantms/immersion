@@ -227,7 +227,7 @@ export interface ReviewItem {
   kind: "word" | "sentence";
   surface: string | null;
   lexeme_id: number | null;
-  mode: "context" | "dictation";
+  mode: "context" | "listen";
   rung: number;
   streak: number;
   context: ReviewContext | null;

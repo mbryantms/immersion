@@ -101,6 +101,23 @@ def test_queue_enrolls_saved_items_and_prefers_fresh_context(client, seeded):
     assert entry["context"]["sentence_id"] != seeded["saved_sentence_id"]
 
 
+def test_sentence_items_review_as_listen(client, db_session, seeded):
+    # no typed input in review: sentence items are listen-and-reveal cards
+    # anchored to their saved context
+    with db_session() as s:
+        saved = SavedItem(kind="sentence", surface=None)
+        s.add(saved)
+        s.flush()
+        s.add(SavedContext(saved_item_id=saved.id, sentence_id=seeded["saved_sentence_id"],
+                           snapshot={"zh": "磨坊很旧。"}))
+        s.commit()
+        sentence_saved_id = saved.id
+    q = client.get("/api/review/queue").json()
+    entry = next(e for e in q["items"] if e["saved_item_id"] == sentence_saved_id)
+    assert entry["mode"] == "listen"
+    assert entry["context"]["sentence_id"] == seeded["saved_sentence_id"]
+
+
 def test_ladder_pass_fail_and_graduation(client, seeded):
     sid = seeded["saved_id"]
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()

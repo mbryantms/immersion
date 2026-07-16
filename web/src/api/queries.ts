@@ -166,7 +166,7 @@ export const useReviewQueue = () =>
     staleTime: 0,
   });
 
-export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string; score?: number }) =>
+export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string }) =>
   post<import("./types").ReviewOutcome>(`/review/${savedItemId}/outcome`, body);
 
 export const useRecommendations = () =>

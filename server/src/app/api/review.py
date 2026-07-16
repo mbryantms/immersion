@@ -2,9 +2,10 @@
 
 Fixed 1d -> 3d -> 7d ladder; fail drops a rung. Word reviews prefer a fresh
 concordance sentence over the saved context (variability); sentence reviews
-are dictation (scored client-side, same LCS as lingua/diff.py). Graduation
-(clearing 7d, or two straight passes at the top rung) surfaces the item for
-the Anki export tray."""
+are listen-and-reveal, self-graded — no typed input anywhere in review (the
+player's dictation panel owns writing practice). Graduation (>=3 spaced
+successes ending at the top rung) surfaces the item for the Anki export
+tray."""
 
 from __future__ import annotations
 
@@ -117,7 +118,7 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
         else:
             live = next((c.sentence_id for c in item.contexts if c.sentence_id), None)
             context = session.get(Sentence, live) if live else None
-            mode = "dictation"
+            mode = "listen"
         out.append({
             "saved_item_id": item.id,
             "kind": item.kind,
@@ -134,7 +135,6 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
 class OutcomeIn(BaseModel):
     result: str  # 'pass' | 'fail'
     mode: str | None = None
-    score: float | None = None  # dictation score, informational
 
 
 @router.post("/review/{saved_item_id}/outcome")
@@ -171,8 +171,7 @@ def review_outcome(saved_item_id: int, body: OutcomeIn, session: Session = Depen
 
     session.add(Event(
         type="review_outcome", lexeme_id=item.lexeme_id, study_mode=body.mode or "review",
-        data={"saved_item_id": saved_item_id, "result": body.result, "score": body.score,
-              "rung": rs.rung},
+        data={"saved_item_id": saved_item_id, "result": body.result, "rung": rs.rung},
     ))
     session.commit()
 
