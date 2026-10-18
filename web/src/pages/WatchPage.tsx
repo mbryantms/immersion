@@ -1,3 +1,5 @@
+import CorrectionEditor from "../player/CorrectionEditor";
+import SourcePanel from "../player/SourcePanel";
 import { sourceSelection } from "../gloss/selection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -61,6 +63,7 @@ function WatchSession() {
   const [playbackError, setPlaybackError] = useState(false);
   const showText = textIsVisible(studyMode, listeningHint);
   const effectiveSubtitleMode = showText ? prefs.subtitleMode : "off";
+  const [correctionFor, setCorrectionFor] = useState<SentenceOut | null>(null);
   const [gloss, setGloss] = useState<GlossTarget | null>(null);
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
   const [enRevealed, setEnRevealed] = useState<Set<number>>(new Set());
@@ -89,7 +92,7 @@ function WatchSession() {
     pauseAfter: prefs.pauseAfter,
     pauseAfterDelayMs: prefs.pauseAfterDelayMs,
     loop,
-    interactionHold: !!gloss,
+    interactionHold: !!gloss || !!correctionFor,
     subtitleMode: effectiveSubtitleMode,
     itemId: id,
   });
@@ -330,7 +333,7 @@ function WatchSession() {
   );
 
   // ---- keyboard (spec §15.2) ------------------------------------------------
-  useKeyboard(gloss ? {
+  useKeyboard(correctionFor ? {} : gloss ? {
     " ": resumeFromGloss,
     Escape: closeGloss,
   } : {
@@ -515,6 +518,7 @@ function WatchSession() {
           </div>
         )}
 
+        <SourcePanel item={item} />
         <StudyModeSelector value={studyMode} onChange={changeStudyMode} />
 
         {sentencesError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm"><p className="grow">The transcript could not be loaded. Your media can still play.</p><Button variant="outline" size="sm" onClick={() => void refetchSentences()}>Retry transcript</Button></div>}
@@ -747,6 +751,7 @@ function WatchSession() {
               {studyMode === "listen" && <div className="flex items-center justify-between gap-2 border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground"><span>Transcript hint is visible</span><Button variant="ghost" size="sm" onClick={() => setListeningHint(false)}>Hide text again</Button></div>}
               {!sentences.length && !sentencesError && <p role="status" className="border-b border-border p-4 text-sm text-muted-foreground">{item.ready ? "No transcript lines are available." : "The transcript is not ready yet. Check processing in Admin."}</p>}
               <TranscriptPanel
+                onEdit={(sentence) => { videoRef.current?.pause(); setCorrectionFor(sentence); }}
                 sentences={sentences}
                 currentIdx={idx}
                 knowledge={knowledge}
@@ -792,6 +797,7 @@ function WatchSession() {
         />
       )}
 
+      {correctionFor && <CorrectionEditor sentenceId={correctionFor.id} itemId={id} onClose={() => setCorrectionFor(null)} />}
       {gloss && createPortal(
         <GlossSheet
           target={gloss}

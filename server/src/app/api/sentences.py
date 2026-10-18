@@ -26,6 +26,7 @@ from ..models import (
     Sense,
     Sentence,
     TextTrack,
+    SentenceIdentity,
 )
 
 router = APIRouter()
@@ -85,6 +86,8 @@ def get_sentences(
     # a cheap ETag turns every reopen into a 304 instead of a re-download;
     # analysis_rev covers in-place reanalysis, which keeps sentence ids
     rev = (item.meta or {}).get("analysis_rev", 0)
+    identity_revision = session.scalar(select(func.coalesce(func.sum(SentenceIdentity.revision), 0))
+                                       .where(SentenceIdentity.item_id == item_id))
     max_id, n = session.execute(
         select(func.max(Sentence.id), func.count()).where(Sentence.item_id == item_id)
     ).one()
@@ -93,7 +96,7 @@ def get_sentences(
     anki_stamp = session.get(Setting, "anki_last_import")
     stamp = ((anki_stamp.value or {}) if anki_stamp else {}).get("at", "")
     etag = 'W/"' + hashlib.sha1(
-        f"{item_id}:{max_id}:{n}:{rev}:{sorted(offsets.items())}:{stamp}".encode()
+        f"{item_id}:{max_id}:{n}:{rev}:{identity_revision}:{sorted(offsets.items())}:{stamp}".encode()
     ).hexdigest()[:20] + '"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304)
@@ -104,6 +107,19 @@ def get_sentences(
         select(Sentence).where(Sentence.item_id == item_id).order_by(Sentence.ordinal)
     ).all()
     in_anki = _anki_matches(session, rows)
+    identities = {identity.id: identity for identity in session.scalars(select(SentenceIdentity).where(SentenceIdentity.item_id == item_id))}
+    tracks = {track.id: track for track in session.scalars(select(TextTrack).where(TextTrack.item_id == item_id))}
+    def provenance(sentence):
+        identity = identities.get(sentence.id)
+        overrides = (identity.overrides or {}) if identity else {}
+        track = tracks.get(sentence.track_id)
+        return {"text_source": "corrected" if "zh" in overrides else track.source if track else "unknown",
+                "translation_source": sentence.en_source,
+                "timing_source": "corrected" if "t0_ms" in overrides or "t1_ms" in overrides else
+                                 "estimated" if track and (track.source == "whisper" or (track.source == "transcript" and track.format != "srt")) else "source cues",
+                "alignment_quality": identity.source.get("timing_quality") if identity else None,
+                "temporal_coverage": sentence.align_conf,
+                "revision": identity.revision if identity else 0}
     return {
         "item_id": item_id,
         # the offset baked into these times; the client shifts live nudges
@@ -118,6 +134,7 @@ def get_sentences(
                 "anki": s.id in in_anki or None,
                 "words": _slim_words(s.analysis, s.zh),
                 "script_variants": script_variants(s.zh),
+                "provenance": provenance(s),
             }
             for s in rows
         ],

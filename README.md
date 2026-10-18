@@ -67,3 +67,5 @@ cd server && uv run pytest
 Space play/pause · ←/→ ±5s · ↑/↓ prev/next sentence · R replay · L loop ·
 S subtitle mode (off/中/中+EN) · T reveal EN · P pinyin · D define ·
 A save sentence · M pause-after-sentence · [ ] speed · Esc close
+
+Source selection, correction history, playback repair, and migration details: [source reliability delivery](docs/SOURCE_RELIABILITY.md).

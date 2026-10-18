@@ -19,6 +19,7 @@ interface Props {
   fontScale: number;
   showEn: (s: SentenceOut) => boolean;
   showPinyin: (sentenceId: number, wordIdx: number) => boolean;
+  onEdit?: (s: SentenceOut) => void;
   onSeek: (s: SentenceOut) => void;
   onTapWord: (s: SentenceOut, w: Word) => void;
   onRevealEn: (s: SentenceOut) => void;
@@ -35,6 +36,7 @@ export default function TranscriptPanel({
   fontScale,
   showEn,
   showPinyin,
+  onEdit,
   onSeek,
   onTapWord,
   onRevealEn,
@@ -182,6 +184,10 @@ export default function TranscriptPanel({
                       {fmt(s.t0)}
                     </button>
                     <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                        {s.provenance && <span>{s.provenance.text_source} · {s.provenance.alignment_quality?.interpolated ? "timing interpolated between nearby lines" : s.provenance.timing_source}{s.provenance.revision > 0 ? ` · revision ${s.provenance.revision}` : ""}</span>}
+                        {onEdit && <button type="button" aria-label={`Correct sentence ${originalIdx + 1}`} onClick={() => onEdit(s)} className="ml-auto min-h-11 rounded-md px-2 hover:bg-white/10">Correct line</button>}
+                      </div>
                       {s.anki && (
                         <span
                           title="Already a card in Anki"

@@ -152,6 +152,7 @@ def analyze_sentences(
     sentences: list[str],
     cedict: Cedict | None = None,
     names: dict[str, str] | None = None,
+    token_lists: list[list[str]] | None = None,
 ) -> list[list[dict]]:
     """Tokenize pre-split sentences -> per-sentence word lists.
 
@@ -169,7 +170,8 @@ def analyze_sentences(
     model_sentences = [t2s(sentence) for sentence in sentences]
     model_sentences = [converted if len(converted) == len(source) else source
                        for source, converted in zip(sentences, model_sentences)]
-    model_tokens = tokenize(model_sentences)
+    supplied_tokens = token_lists is not None
+    model_tokens = token_lists if supplied_tokens else tokenize(model_sentences)
     token_lists = []
     for source, model_text, tokens in zip(sentences, model_sentences, model_tokens):
         surfaces, cursor = [], 0
@@ -180,7 +182,7 @@ def analyze_sentences(
             cursor = start + len(token)
             surfaces.append(source[start:cursor])
         token_lists.append(surfaces)
-    entity_lists = ner_entities(token_lists)
+    entity_lists = [[] for _ in token_lists] if supplied_tokens else ner_entities(token_lists)
 
     lexicon = dict(names or {})
     for entities in entity_lists:

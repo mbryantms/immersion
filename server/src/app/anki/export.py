@@ -78,9 +78,10 @@ def _fields(session: Session, item: SavedItem) -> tuple[dict, dict]:
         from ..lingua.cedict import load as load_cedict
 
         gl = load_cedict().gloss(simplified) or []
-        meaning = item.selected_meaning or "; ".join(d for g in gl for d in g.get("defs", []))[:500]
+        contextual_meaning = next((w.get("meaning") for w in context_words if w.get("lex") == item.lexeme_id and (occurrence_start is None or w.get("start") == occurrence_start)), None)
+        meaning = item.selected_meaning or contextual_meaning or "; ".join(d for g in gl for d in g.get("defs", []))[:500]
     else:
-        simplified = item.surface or zh
+        simplified = zh or item.surface or ""
         traditional = ""
         pinyin = _marks(simplified)
         meaning = en
@@ -238,7 +239,9 @@ def export_items(session: Session, entries: list[dict], progress=lambda msg: Non
                     data = _frame(src, mid)
                     ac("storeMediaFile", filename=f"{stem}-frame.jpg", data=base64.b64encode(data).decode())
                     fields[image_field] = f'<img src="{stem}-frame.jpg">'
-            if item.kind == "word" and not item.selected_reading and "Audio" in model_fields:
+            user_reading = any(word.get("lex") == item.lexeme_id and word.get("reading_source") == "user"
+                               for word in (sentence.analysis or {}).get("words", []))
+            if item.kind == "word" and not item.selected_reading and not user_reading and "Audio" in model_fields:
                 try:
                     fields["Audio"] = _store(f"{stem}-word.mp3", _tts(fields.get("Simplified", "")))
                 except Exception:

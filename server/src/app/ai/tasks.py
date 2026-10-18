@@ -5,6 +5,7 @@ sentence instead of redoing the episode (podreader was all-or-nothing)."""
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
 
 from sqlalchemy import select
@@ -163,7 +164,8 @@ def _explain(session: Session, sentence: Sentence, artifact_type: str, prompt: s
     so re-ingested episodes reuse explanations for unchanged sentences. The AI
     is grounded on the app's own tokenization; pinyin/HSK/POS/glosses are
     merged in from the analysis + lexicon rather than generated."""
-    input_hash = hashlib.sha256(sentence.zh.encode()).hexdigest()[:16]
+    context = {"zh": sentence.zh, "en": sentence.en, "analysis": sentence.analysis, "model": settings.ai_model}
+    input_hash = hashlib.sha256(json.dumps(context, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
     cached = _cached_artifact(session, artifact_type, input_hash)
     if cached is not None:
         return cached
@@ -174,7 +176,7 @@ def _explain(session: Session, sentence: Sentence, artifact_type: str, prompt: s
             return cached
 
         words, zh_tokens, lex_by_id = _explain_context(session, sentence)
-        en_line = f"Track translation (context, may be loose): {sentence.en}\n" if sentence.en else ""
+        en_line = f"{sentence.en_source or 'Unknown source'} translation (context, may be loose): {sentence.en}\n" if sentence.en else ""
         result = provider.complete_json(
             prompt.format(
                 zh=sentence.zh,
@@ -233,7 +235,8 @@ def translate_item(session: Session, item_id: int, progress=lambda msg: None) ->
 
     todo = session.scalars(
         select(Sentence)
-        .where(Sentence.item_id == item_id, Sentence.en.is_(None))
+        .where(Sentence.item_id == item_id, Sentence.en.is_(None),
+               Sentence.en_source.is_(None) | (Sentence.en_source != "user"))
         .order_by(Sentence.ordinal)
     ).all()
     done = 0
@@ -241,15 +244,32 @@ def translate_item(session: Session, item_id: int, progress=lambda msg: None) ->
         chunk = todo[i : i + BATCH]
         progress(f"translating {i + len(chunk)}/{len(todo)}")
         numbered = "\n".join(f"{j + 1}. {s.zh}" for j, s in enumerate(chunk))
+        from ..models import SentenceIdentity
+        expected = dict(session.execute(select(SentenceIdentity.id, SentenceIdentity.revision)
+                                        .where(SentenceIdentity.id.in_([sentence.id for sentence in chunk]))).all())
         result = provider.complete_json(PROMPT.format(numbered=numbered))
         if not isinstance(result, list) or len(result) != len(chunk):
             raise RuntimeError(
                 f"translation count mismatch: {len(chunk)} sent, "
                 f"{len(result) if isinstance(result, list) else type(result)} back"
             )
+        translated = 0
         for s, en in zip(chunk, result):
+            from ..corrections import identity_for
+            from sqlalchemy import update
+            identity = identity_for(session, s)
+            revision = expected.get(s.id, 0)
+            claimed = session.execute(update(SentenceIdentity).where(
+                SentenceIdentity.id == s.id, SentenceIdentity.revision == revision
+            ).values(revision=revision + 1).execution_options(synchronize_session=False))
+            if claimed.rowcount != 1:
+                session.expire(s)
+                continue  # A local edit made while the provider was running wins.
             s.en = str(en)
             s.en_source = "ai"
+            identity.source = {**identity.source, "en": s.en, "en_source": "ai"}
+            identity.revision = revision + 1
+            translated += 1
             session.add(AiArtifact(
                 target_kind="sentence", target_id=s.id, artifact_type="translation",
                 provider="claude-cli", model=settings.ai_model,
@@ -262,7 +282,8 @@ def translate_item(session: Session, item_id: int, progress=lambda msg: None) ->
         for s in chunk:
             session.execute(text("UPDATE sentence_fts SET en = :en WHERE rowid = :id"),
                             {"en": s.en, "id": s.id})
+        session.refresh(item, attribute_names=["meta"])
         item.meta = {**(item.meta or {}), "analysis_rev": (item.meta or {}).get("analysis_rev", 0) + 1}
         session.commit()  # per-batch checkpoint: retries resume where en is NULL
-        done += len(chunk)
+        done += translated
     return {"translated": done, "already_done": len(todo) == 0}

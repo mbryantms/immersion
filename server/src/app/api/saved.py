@@ -20,6 +20,7 @@ from ..models import (
     SavedContext,
     SavedItem,
     Sentence,
+    SentenceIdentity,
     TokenOccurrence,
 )
 
@@ -38,9 +39,11 @@ class SaveIn(BaseModel):
 
 def _snapshot(session: Session, sentence: Sentence) -> dict:
     item = session.get(MediaItem, sentence.item_id)
+    identity = session.get(SentenceIdentity, sentence.id)
     return {
         "item_id": sentence.item_id, "item_title": item.title if item else None,
-        "sentence_ord": sentence.ordinal,
+        "sentence_ord": sentence.ordinal, "sentence_revision": identity.revision if identity else 0,
+        "source_fingerprint": item.fingerprint if item else None,
         "zh": sentence.zh, "en": sentence.en, "t0_ms": sentence.t0_ms, "t1_ms": sentence.t1_ms,
         "analysis": sentence.analysis, "track_id": sentence.track_id,
     }
@@ -74,13 +77,23 @@ def save_item(body: SaveIn, session: Session = Depends(get_session)):
                 raise HTTPException(400, "occurrence does not match this word")
             if body.selected_reading:
                 from ..lingua.readings import set_reading
+                from ..corrections import identity_for
+                from ..models import SentenceCorrection
+                from copy import deepcopy
+                identity = identity_for(session, sentence)
                 try:
                     words = [set_reading(w, body.selected_reading)
                              if w.get("start") == body.occurrence_start and w.get("lex") == body.lexeme_id
                              else w for w in words]
                 except ValueError as error:
                     raise HTTPException(400, str(error)) from error
-                sentence.analysis = {**(sentence.analysis or {}), "words": words}
+                changed_analysis = {**(sentence.analysis or {}), "words": words}
+                if changed_analysis != sentence.analysis:
+                    identity.revision += 1
+                    identity.overrides = {**(identity.overrides or {}), "analysis": deepcopy(changed_analysis)}
+                    session.add(SentenceCorrection(sentence_id=sentence.id, revision=identity.revision,
+                                                   action="select reading", overrides=deepcopy(identity.overrides)))
+                sentence.analysis = changed_analysis
                 session.execute(update(TokenOccurrence).where(
                     TokenOccurrence.sentence_id == sentence.id,
                     TokenOccurrence.start_offset == body.occurrence_start,

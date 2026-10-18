@@ -29,29 +29,31 @@ def needs_remux(item: MediaItem) -> bool:
     if item.kind != "video" or not item.available or item.vcodec is None:
         return False
     ext = Path(item.relpath).suffix.lower()
-    return (
-        ext not in DIRECT_EXTS
-        or item.vcodec not in DIRECT_VIDEO
-        or (item.acodec is not None and item.acodec not in DIRECT_AUDIO)
-    )
+    if ext in (".mp4", ".m4v"):
+        return item.vcodec not in {"h264", "av1"} or item.acodec not in {None, "aac", "mp3"}
+    if ext == ".webm":
+        return item.vcodec not in {"vp8", "vp9", "av1"} or item.acodec not in {None, "opus", "vorbis"}
+    return True
 
 
 def remux_current(item: MediaItem) -> bool:
-    return ((item.meta or {}).get("remux") or {}).get("fp") == item.fingerprint
+    meta = (item.meta or {}).get("remux") or {}
+    output = settings.remux_dir / f"{item.id}.mp4"
+    return bool(meta and meta.get("fp") == item.fingerprint and output.is_file() and output.stat().st_size > 0)
 
 
-def remux_item(session: Session, item_id: int, progress=lambda msg: None) -> dict:
+def remux_item(session: Session, item_id: int, progress=lambda msg: None, force=False) -> dict:
     item = session.get(MediaItem, item_id)
-    if item is None or not needs_remux(item):
+    if item is None or not item.available or (not force and not needs_remux(item)):
         return {"skipped": True}
     out = settings.remux_dir / f"{item.id}.mp4"
-    if remux_current(item) and out.exists():
+    if not force and remux_current(item):
         return {"skipped": "remux current"}
 
     root = session.get(MediaRoot, item.root_id)
     src = Path(root.path) / item.relpath
-    v_copy = item.vcodec in DIRECT_VIDEO
-    a_copy = item.acodec in DIRECT_AUDIO or item.acodec is None
+    v_copy = not force and item.vcodec == "h264"
+    a_copy = not force and item.acodec in {None, "aac", "mp3"}
     v_args = ["-c:v", "copy"] if v_copy else [
         "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", "-pix_fmt", "yuv420p",
     ]
@@ -65,14 +67,16 @@ def remux_item(session: Session, item_id: int, progress=lambda msg: None) -> dic
             ["ffmpeg", "-loglevel", "error", "-i", str(src),
              "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
              *v_args, *a_args, "-movflags", "+faststart", "-y", str(tmp)],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, timeout=7200,
         )
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"ffmpeg remux failed: {(e.stderr or '')[-500:]}") from e
+        raise RuntimeError(f"ffmpeg remux failed: {(str(e.stderr or ''))[-500:]}") from e
     tmp.replace(out)
 
+    from uuid import uuid4
     item.meta = {**(item.meta or {}), "remux": {
+        "revision": uuid4().hex,
         "fp": item.fingerprint,
         "video": "copy" if v_copy else "h264",
         "audio": "copy" if a_copy else "aac",

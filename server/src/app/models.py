@@ -1,6 +1,7 @@
 """Domain model. Single-household deployment: no users table — adding one later
-is a single boring migration. Original media and subtitle text are immutable;
-derived analysis lives in sentence.analysis (render payload) plus
+is a single boring migration. Original media/subtitle files stay immutable; source snapshots live in
+sentence_identity and local edits project into sentence. Analysis lives in
+sentence.analysis (render payload) plus
 token_occurrence rows (coverage/concordance queries)."""
 
 from __future__ import annotations
@@ -98,7 +99,7 @@ class Sentence(Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))
     track_id: Mapped[int] = mapped_column(ForeignKey("text_track.id"))
     ordinal: Mapped[int] = mapped_column(Integer)
-    zh: Mapped[str] = mapped_column(Text)  # original text, never mutated
+    zh: Mapped[str] = mapped_column(Text)  # current projection; original is in sentence_identity.source
     trad: Mapped[str | None] = mapped_column(Text)  # OpenCC/CEDICT conversion
     t0_ms: Mapped[int] = mapped_column(Integer)
     t1_ms: Mapped[int] = mapped_column(Integer)
@@ -107,6 +108,29 @@ class Sentence(Base):
     align_conf: Mapped[float | None] = mapped_column(Float)  # zh↔en overlap ratio
     analysis: Mapped[dict | None] = mapped_column(JSON)  # {words:[{t,type,py,tones,gloss,lex,tr}]}
     __table_args__ = (Index("ix_sentence_item_ord", "item_id", "ordinal"),)
+
+
+class SentenceIdentity(Base):
+    """Permanent identity and source snapshot. Never deleted or reused."""
+    __tablename__ = "sentence_identity"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("media_item.id"), index=True)
+    track_id: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[dict] = mapped_column(JSON, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    overrides: Mapped[dict | None] = mapped_column(JSON)
+    __table_args__ = {"sqlite_autoincrement": True}
+
+
+class SentenceCorrection(Base):
+    __tablename__ = "sentence_correction"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sentence_id: Mapped[int] = mapped_column(ForeignKey("sentence_identity.id"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String)
+    overrides: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint("sentence_id", "revision"),)
 
 
 class TokenOccurrence(Base):

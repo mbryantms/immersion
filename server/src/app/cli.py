@@ -14,7 +14,8 @@ def main() -> None:
     sub.add_parser("upgrade", help="run DB migrations")
 
     p_root = sub.add_parser("add-root", help="register a media root and queue a scan")
-    p_root.add_argument("slug")
+    from .config import validate_root_slug
+    p_root.add_argument("slug", type=validate_root_slug)
     p_root.add_argument("path")
     p_root.add_argument("--kind", default="video", choices=["video", "podcast"])
     p_root.add_argument("--include", default=None, help="glob(s), ';'-separated, e.g. 'Level */*'")

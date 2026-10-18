@@ -53,7 +53,7 @@ These are planning ranges, not committed dates. Re-estimate after M1 and after t
 | L03 | Store contextual pronunciation separately from first dictionary reading | Partial | Subtitle ruby, lookup, review, and exported pinyin agree; 还/长/行/重/地 fixtures cover multiple contexts; alternatives are labelled rather than silently substituted |
 | L04 | Store selected meaning and reading on a saved learning item | Delivered | 会 as ability and 会 as meeting can be learned separately; one sense does not automatically establish all readings/meanings |
 | L05 | Explain lexical tones versus connected speech | Planned | Optional notes cover third-tone sandhi, 一/不, neutral tone, and erhua; dictionary notation is labelled; no fabricated word-level timing is presented as exact |
-| L06 | Let users correct text, reading, meaning, and timing locally | Planned | Corrections have provenance/revision history, survive rescans, and propagate to search, review, cache, and export; reset original is reversible |
+| L06 | Let users correct text, reading, meaning, and timing locally | Delivered | Corrections have provenance/revision history, survive rescans, and propagate to search, review, cache, and export; reset original is reversible |
 | L07 | Handle segmentation exceptions and multiword constructions | Planned | Separable verbs and constructions can span tokens; user corrections and per-series names do not corrupt dictionary vocabulary |
 | L08 | Improve regional/script presentation and character practice | Planned | Traditional preferences apply consistently to word pages/examples; source region can be recorded; components, phonetic families, and confusing forms aid reading; handwriting is optional |
 | L09 | Preserve code-switching text and meaningful spaces | Partial | 我是 Nathan and English passages remain readable after sentence splitting; numbers and names remain assessable |
@@ -64,19 +64,19 @@ Migration strategy: add nullable canonical/occurrence/sense fields; backfill in 
 
 | ID | Issue and implementation | Status | Acceptance criteria |
 | --- | --- | --- | --- |
-| D01 | Revise transcript caches after translation, alignment, replacement, or analysis | Partial | Translation/alignment increment revision; clients periodically revalidate. Complete revision handling for every edit path; browser tests show new timing/English without reload |
+| D01 | Revise transcript caches after translation, alignment, replacement, or analysis | Delivered | Translation/alignment increment revision; clients periodically revalidate. Complete revision handling for every edit path; browser tests show new timing/English without reload |
 | D02 | Update English FTS in the translation transaction | Delivered | Newly translated sentences are searchable immediately; failed batches retain the already committed index and translations |
 | D03 | Treat search input as literals; normalise tones and canonical script | Partial | Punctuation/FTS-looking input never causes a server error; spaced numbered/marked pinyin and traditional queries find simplified sources. Add concatenated pinyin, ü variants, and traditional-source backfill |
 | D04 | Persist learner events until acknowledgement | Delivered | HTTP failure, offline reload, declined beacon, and uncertain beacon delivery retain UUIDs; acknowledged entries are removed; duplicate delivery does not double counters |
 | D05 | Use effective track timing everywhere | Partial | Review/search/export use the shared timing helper; complete all snapshot and custom-clip consumers; positive/negative offsets tested near zero |
 | D06 | Reset player session state between items | Delivered | Episode navigation remounts item-specific state; resume, speed, reveals, dialogs, and hints do not leak to another item |
-| D07 | Repair subtitle discovery and selection | Planned | Deleted/unreadable sidecars are deselected; all available tracks can be selected explicitly; selected source/script is visible; embedded cache includes media fingerprint |
-| D08 | Repair missing/stale media caches | Planned | Missing remux/audio triggers repair; regenerated URLs include content revision; thumbnails update after source changes; writes are atomic |
-| D09 | Handle codec/container/audio-track combinations | Planned | Actual browser capability and tested fallback determine direct play; audible Mandarin track selection is explicit; conversion failures have recovery actions |
-| D10 | Make root configuration work through the local serving stack | Planned | Adding a root makes it streamable in dev and production without a manual Caddy edit; reserved routes cannot collide; missing roots do not erase history |
-| D11 | Improve podcast pairing and ingestion diagnostics | Planned | Dates and episode numbers do not silently pair wrong files; ambiguous pairs are reviewable; timed SRT input preserves useful timing rather than discarding it |
-| D12 | Preserve sentence identity across reingest | Planned | Repeated identical lines relink by source/time/identity; SQLite ID reuse cannot attach old events to new text; saved attempts and contexts retain revisions |
-| D13 | Backup, export, and restore personal learning data | Planned | SQLite online backup includes WAL consistency; preferences/attempts/corrections can be exported; restoring to a clean install is tested; caches are regenerable |
+| D07 | Repair subtitle discovery and selection | Delivered | Deleted/unreadable sidecars are deselected; all available tracks can be selected explicitly; selected source/script is visible; embedded cache includes media fingerprint |
+| D08 | Repair missing/stale media caches | Partial | Missing remux/audio triggers repair; regenerated URLs include content revision; thumbnails update after source changes; writes are atomic |
+| D09 | Handle codec/container/audio-track combinations | Partial | Actual browser capability and tested fallback determine direct play; audible Mandarin track selection is explicit; conversion failures have recovery actions |
+| D10 | Make root configuration work through the local serving stack | Delivered | Adding a root makes it streamable in dev and production without a manual Caddy edit; reserved routes cannot collide; missing roots do not erase history |
+| D11 | Improve podcast pairing and ingestion diagnostics | Partial | Dates and episode numbers do not silently pair wrong files; ambiguous pairs are reviewable; timed SRT input preserves useful timing rather than discarding it |
+| D12 | Preserve sentence identity across reingest | Delivered | Repeated identical lines relink by source/time/identity; SQLite ID reuse cannot attach old events to new text; saved attempts and contexts retain revisions |
+| D13 | Backup, export, and restore personal learning data | Partial | SQLite online backup includes WAL consistency; preferences/attempts/corrections can be exported; restoring to a clean install is tested; caches are regenerable |
 | D14 | Separate CPU and GPU setup and expose capability status | Planned | CPU install does not require CUDA packages; GPU fallback is explained; missing ffmpeg/models/Anki are actionable; optional network features fail gracefully |
 
 ## M4 Learner evidence and recommendations
@@ -99,9 +99,9 @@ Migration strategy: add nullable canonical/occurrence/sense fields; backfill in 
 | G03 | Teach reusable constructions | Planned | 的/地/得, 了/过/着, 把/被, complements, measure words, topic-comment, comparisons, separable verbs, and paired patterns link to contrasting library examples |
 | G04 | Make vocabulary mining selective | Planned | Daily intake budget, usefulness/repetition signals, and easy suspension keep review manageable; saved count is not treated as success |
 | G05 | Add recording/shadowing and careful pronunciation feedback | Planned | Source/repeated learner audio can be compared; recognition confidence is not presented as pronunciation accuracy; tone claims require a validated assessment method |
-| G06 | Expose source and timing provenance | Planned | Official/sidecar/ASR/corrected text, source/generated translation, engine, and timing reliability are distinguishable; low-quality material is excluded from high-stakes grading |
-| G07 | Repair alignment confidence semantics | Planned | Timestamp overlap is labelled temporal coverage; overlapping intervals use union coverage; mismatches and interpolated timings are flagged; semantic correctness is assessed separately |
-| G08 | Ground and validate AI explanations | Planned | Cache includes prompt/model/context/analysis revisions; strict response schemas and token coverage reject malformed output; corrections/rejections persist |
+| G06 | Expose source and timing provenance | Partial | Official/sidecar/ASR/corrected text, source/generated translation, engine, and timing reliability are distinguishable; low-quality material is excluded from high-stakes grading |
+| G07 | Repair alignment confidence semantics | Partial | Timestamp overlap is labelled temporal coverage; overlapping intervals use union coverage; mismatches and interpolated timings are flagged; semantic correctness is assessed separately |
+| G08 | Ground and validate AI explanations | Partial | Cache includes prompt/model/context/analysis revisions; strict response schemas and token coverage reject malformed output; corrections/rejections persist |
 | G09 | Control speculative AI work and offline behaviour | Planned | Explicit requests outrank prefetch; prefetch can be disabled; jobs have bounded concurrency/cancellation; remote use is visible; unavailable AI never blocks core study |
 
 ## M6 Interface and performance
@@ -116,8 +116,8 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 | U04 | Dictation accessibility and efficiency | Partial | Labelled input, IME-safe submit, longer touch targets, stored attempts, and bounded input. Finish full virtualisation, measured row heights, memoised feedback, and interruption-safe persistence |
 | U05 | Profile real local workloads | Planned | Measure small/large libraries, long transcripts, CPU transcription, playback while importing, and memory/VRAM; publish baseline hardware and p50/p95 measurements |
 | U06 | Optimise queue, library, and alignment queries | Planned | Due filtering/limits execute in SQL; batch related rows; avoid ORDER BY random on large sets; cache measured costly coverage aggregates; sweep sorted subtitle intervals |
-| U07 | Prioritise interactive work without resource contention | Planned | Long transcription/transcode cannot starve quick dictionary/review/export work; bounded workers or cooperative stages respect CPU/GPU budgets; ffmpeg has timeouts/cancellation |
-| U08 | Automate interaction and accessibility regression checks | Partial | 26 Playwright checks cover real React routes with synthetic media, including nine page axe scans and the gloss dialog; full build passes. Add CI and manual screen-reader/Safari checks |
+| U07 | Prioritise interactive work without resource contention | Partial | Long transcription/transcode cannot starve quick dictionary/review/export work; bounded workers or cooperative stages respect CPU/GPU budgets; ffmpeg has timeouts/cancellation |
+| U08 | Automate interaction and accessibility regression checks | Partial | 33 Playwright checks cover real React routes with synthetic media, including nine page axe scans and the gloss dialog; full build passes. Add CI and manual screen-reader/Safari checks |
 
 ## M7 Retention and outcomes
 
@@ -156,7 +156,7 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 ## Recommended next pull requests
 
 1. **Canonical forms and selected readings follow-up:** reconcile legacy duplicate lexeme IDs without conflating learning evidence; improve automatic polyphone/particle disambiguation and correct spans that change segmentation. The first implementation of L01–L04 and P02 is delivered; see [Mandarin phase delivery](MANDARIN_REPRESENTATION.md).
-2. **Reliable source media and corrections:** L06, D01 completion, D07–D13, and G06–G07.
+2. **Media recovery follow-up:** complete D08–D09 and D11/D13, including artwork/ASR caches, explicit Mandarin audio-track selection, ambiguous-pair diagnostics, and full personal-data export/restore. The correction/identity/source-selection delivery is described in [source reliability](SOURCE_RELIABILITY.md).
 3. **Evidence-based learner model:** K01–K06, with migration preserving original events and Anki evidence.
 4. **Guided scenes and grammar:** G01–G05, validated question generation, and hint-aware outcomes.
 5. **Daily-use polish and retention:** remaining U items, A01–A04, O01–O03, and measured performance improvements.
@@ -166,3 +166,9 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 See [implementation, migration, verification, and limitations](MANDARIN_REPRESENTATION.md). This phase adds source offsets in Unicode codepoints, dictionary-backed traditional aliases, normalized tokenizer input mapped back to original text, context-level pinyin estimates, explicit per-definition saves, occurrence-specific reading replay, and conservative opt-in dictation script pairs. A sense-specific graduation never marks the whole lexeme known. Existing source text, sentence IDs, events, and saved IDs are preserved by the additive migration and in-place backfill.
 
 L01 remains partial because historical duplicate lexeme IDs are retained rather than automatically combining their knowledge/events. L03 remains partial because automatic pronunciation is not a validated linguistic analysis; fixtures improve known cases but particles and ambiguous contexts still require a selected reading. L09 covers the analysis/sentence-splitting path; subtitle ingestion paths still need a full spacing audit. A01 now exports selected reading/meaning and contextual sentence pinyin; live Anki/media validation remains pending. Full M2 also includes L05–L08, which remain planned.
+
+## Source reliability and local corrections delivery
+
+[Implementation, migration, and validation](SOURCE_RELIABILITY.md) describes the next completed delivery. Local text/meaning/reading/timing corrections now have history, conflict protection, reset/restore, and an editor. Permanent sentence identities preserve matched contexts across reingestion and prevent SQLite ID reuse from reassigning old events. New checked dictation attempts retain their expected text and revision. Subtitle choices persist, unavailable tracks are deselected, and embedded caches include source fingerprints. Playback repair, cache revision URLs, conservative codec/container checks, dynamic-root serving, safer podcast pairing, timed SRT ingestion, union temporal coverage, and interpolation flags are implemented.
+
+D08 remains partial for artwork and ASR-cache recovery; D09 for explicit audio-track selection/browser capability testing; D11 for reviewable ambiguity diagnostics; D13 for a full export/restore flow including browser data. G06–G08 remain partial for provenance-aware task filtering, fuller alignment-quality presentation/validation, and strict AI schemas/correction handling. U07 has ffmpeg timeouts, but worker isolation, budgets, and cancellation remain outstanding. Legacy records cannot recover source revisions that were never recorded. No production database or local deployment was changed during this work.

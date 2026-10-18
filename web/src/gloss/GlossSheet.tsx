@@ -216,6 +216,7 @@ export default function GlossSheet({
         </div>
 
         <div className="transcript-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          {target.word?.meaning && <p className="mb-3 text-sm text-teal-200">Your meaning in this line: {target.word.meaning}</p>}
           <p className="mb-3 text-xs text-stone-400">Choose the dictionary entry you intend to learn. Automatic readings are estimates; dictionary tones may differ from connected speech.</p>
           {target.word?.reading && <p className="mb-3 text-sm text-teal-200">In this sentence ({target.word.reading_source === "user" ? "selected" : "automatic"}): {formatPinyin(target.word.reading, pinyinStyle)}</p>}
           <div className="space-y-2.5">

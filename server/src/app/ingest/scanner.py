@@ -40,6 +40,8 @@ def _included(relpath: str, include_glob: str | None) -> bool:
 
 def scan_video_root(session: Session, root: MediaRoot, progress=lambda msg: None) -> dict:
     base = Path(root.path)
+    if not base.is_dir():
+        raise RuntimeError(f"Media root is unavailable: {base}; library history was retained")
     seen_relpaths: set[str] = set()
     stats = {"new": 0, "changed": 0, "unchanged": 0, "missing": 0}
     existing = {
@@ -140,8 +142,8 @@ def _queue_extras(session: Session, item: MediaItem) -> None:
     from .embedded import has_embedded_candidate
     from .remux import needs_remux, remux_current
 
-    if needs_remux(item) and not remux_current(item):
-        enqueue(session, "remux_item", {"item_id": item.id})
+    if (needs_remux(item) or (item.meta or {}).get("remux")) and not remux_current(item):
+        enqueue(session, "remux_item", {"item_id": item.id, "force": not needs_remux(item)})
     if (
         not item.ready
         and has_embedded_candidate(item)
@@ -161,6 +163,7 @@ def _sync_tracks(session: Session, root: MediaRoot, item: MediaItem, path: Path)
             select(TextTrack).where(TextTrack.item_id == item.id, TextTrack.source == "sidecar")
         )
     }
+    seen = set()
     for side in find_sidecars(path):
         f: Path = side["path"]
         rel = str(f.relative_to(base))
@@ -168,6 +171,7 @@ def _sync_tracks(session: Session, root: MediaRoot, item: MediaItem, path: Path)
             text, encoding = sniff_read(f)
         except (UnicodeDecodeError, OSError):
             continue
+        seen.add(rel)
         lang = side["lang"] or ("zh" if cjk_ratio(text) > 0.2 else "en")
         content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         track = existing.get(rel)
@@ -175,13 +179,22 @@ def _sync_tracks(session: Session, root: MediaRoot, item: MediaItem, path: Path)
             session.add(TextTrack(
                 item_id=item.id, lang=lang, source="sidecar", relpath=rel,
                 format=f.suffix.lstrip(".").lower(), encoding=encoding,
-                content_hash=content_hash,
+                content_hash=content_hash, meta={"available": True},
             ))
             changed = True
-        elif track.content_hash != content_hash:
+        elif track.content_hash != content_hash or not (track.meta or {}).get("available", True):
             track.content_hash = content_hash
             track.encoding = encoding
+            track.meta = {**(track.meta or {}), "available": True}
             changed = True
+    for rel, track in existing.items():
+        if rel not in seen and (track.meta or {}).get("available", True):
+            track.meta = {**(track.meta or {}), "available": False, "reason": "File missing or unreadable"}
+            track.selected = False
+            changed = True
+    session.flush()
+    from ..tracks import choose_tracks
+    choose_tracks(session, item)
     if changed:
         session.flush()
     return changed

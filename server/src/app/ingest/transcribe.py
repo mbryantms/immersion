@@ -134,7 +134,7 @@ def whisper_transcribe_item(session: Session, item_id: int, progress=lambda msg:
 
     progress(f"analyzing {len(segments)} sentences")
     write_sentences(session, item, track, segments, en_assign)
-    make_thumb(video, item.id, item.duration_ms)
+    make_thumb(video, item.id, item.duration_ms, item.fingerprint)
     item.ready = True
     if item.series_id:
         series = session.get(Series, item.series_id)

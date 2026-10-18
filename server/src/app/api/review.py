@@ -125,6 +125,8 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
             context = session.get(Sentence, live) if live else None
             mode = "listen"
         payload = _sentence_payload(session, context) if context else None
+        if item.kind == "word" and payload and not any(w.get("lex") == item.lexeme_id for w in payload["words"]) and item.surface not in payload["zh"]:
+            payload = None  # Source edits must not silently test a different word.
         if payload is None:
             snap = next((c.snapshot for c in item.contexts if (c.snapshot or {}).get("zh")), None)
             if snap:
@@ -136,6 +138,7 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
         lex = session.get(Lexeme, item.lexeme_id) if item.lexeme_id else None
         senses = session.scalars(select(Sense).where(Sense.lexeme_id == item.lexeme_id)
                                  .order_by(Sense.ord).limit(4)).all() if lex else []
+        contextual_meaning = next((word.get("meaning") for word in (payload or {}).get("words", []) if word.get("lex") == item.lexeme_id), None)
         out.append({
             "saved_item_id": item.id,
             "kind": item.kind,
@@ -148,7 +151,7 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
             "answer": {"pinyin": item.selected_reading or next((w.get("reading") for w in (payload or {}).get("words", [])
                                 if w.get("lex") == item.lexeme_id and w.get("reading")), lex.pinyin if lex else None),
                        "senses": ([{"py": item.selected_reading, "defs": [item.selected_meaning]}]
-                                  if item.selected_meaning else
+                                  if item.selected_meaning else [{"py": None, "defs": [contextual_meaning]}] if contextual_meaning else
                                   [{"py": sense.pinyin, "defs": sense.glosses} for sense in senses])},
         })
     return {"due": len(due), "items": out}

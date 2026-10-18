@@ -96,6 +96,7 @@ def _ends_latin(sent: str) -> bool:
 def sentence_times(
     sentences: list[str],
     whisper_words: list[tuple[str, float, float]],
+    with_quality: bool = False,
 ) -> list[tuple[float, float]]:
     """Per-sentence (t0_s, t1_s). Unmatched sentences are interpolated between
     neighbors; spans are clamped monotonic with a minimum duration."""
@@ -150,4 +151,15 @@ def sentence_times(
         if ext > end:
             result[i] = (start, ext)
 
-    return [(round(s, 2), round(e, 2)) for s, e in result]
+    rounded = [(round(s, 2), round(e, 2)) for s, e in result]
+    if with_quality:
+        totals, matches = [0] * len(sentences), [0] * len(sentences)
+        for index, anchor in zip(ref_sent_idx, times):
+            totals[index] += 1
+            matches[index] += anchor is not None
+        quality = [{"matched_fraction": round(matches[index] / max(1, totals[index]), 3),
+                    "interpolated": spans[index] is None,
+                    "method": "whisper character alignment; estimated sentence boundaries"}
+                   for index in range(len(sentences))]
+        return rounded, quality
+    return rounded

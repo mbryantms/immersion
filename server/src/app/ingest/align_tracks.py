@@ -16,7 +16,7 @@ def assign_en(segments: list[Segment], en_cues: list[Cue]) -> list[tuple[str | N
     out: list[tuple[str | None, float]] = []
     for seg in segments:
         hits = []
-        covered = 0
+        intervals = []
         for c in en_cues:
             ov = min(seg.t1_ms, c.t1_ms) - max(seg.t0_ms, c.t0_ms)
             if ov <= 0:
@@ -25,12 +25,16 @@ def assign_en(segments: list[Segment], en_cues: list[Cue]) -> list[tuple[str | N
             if ov < 0.15 * (c.t1_ms - c.t0_ms):
                 continue
             hits.append((c.t0_ms, c.text))
-            covered += ov
+            intervals.append((max(seg.t0_ms, c.t0_ms), min(seg.t1_ms, c.t1_ms)))
         if not hits:
             out.append((None, 0.0))
             continue
         hits.sort()
         text = " ".join(t for _, t in hits)
+        covered, end = 0, seg.t0_ms
+        for left, right in sorted(intervals):
+            covered += max(0, right - max(left, end))
+            end = max(end, right)
         conf = min(1.0, covered / max(1, seg.t1_ms - seg.t0_ms))
         out.append((text, round(conf, 3)))
     return out

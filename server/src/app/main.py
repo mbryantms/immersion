@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db
 from .api import (
     anki,
+    corrections,
     app_settings,
     events,
     jobs,
@@ -42,7 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for module in (library, sentences, knowledge, saved, progress, events, jobs, app_settings, anki,
+for module in (corrections, library, sentences, knowledge, saved, progress, events, jobs, app_settings, anki,
                review, search, stats):
     app.include_router(module.router, prefix="/api")
 app.include_router(media.router)  # /media/* — Caddy owns this path in prod

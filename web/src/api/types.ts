@@ -6,6 +6,7 @@ export interface Word {
   start?: number; // Unicode codepoints, half-open source offsets
   end?: number;
   reading?: string;
+  meaning?: string;
   reading_source?: string;
   type: "zh" | "x";
   py?: string[];
@@ -25,6 +26,7 @@ export interface SentenceOut {
   t1: number;
   en: string | null;
   conf: number | null;
+  provenance?: { text_source: string; translation_source: string | null; timing_source: string; temporal_coverage: number | null; alignment_quality?: { matched_fraction: number; interpolated: boolean } | null; revision: number };
   anki?: boolean; // already exists as an Anki card
   words: Word[];
   script_variants?: Record<string, string>;
@@ -127,7 +129,9 @@ export interface ItemDetail {
   series: { id: number; title: string; level: number | null } | null;
   stream_url: string;
   thumb_url: string;
-  tracks: { id: number; lang: string; source: string; format: string; offset_ms: number; selected: boolean }[];
+  tracks: { id: number; lang: string; source: string; format: string; offset_ms: number; selected: boolean; available?: boolean; label?: string }[];
+  active_tracks?: { zh: number | null; en: number | null };
+  source_status?: string | null;
   n_sentences: number;
   progress: { position_ms: number; completed: boolean; subtitle_mode: string | null };
   prev_item_id: number | null;

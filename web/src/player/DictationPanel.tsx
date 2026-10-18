@@ -18,6 +18,9 @@ interface Attempt {
   typed: string;
   checked: boolean;
   scriptPolicy?: "source" | "equivalent";
+  expected?: string;
+  sourceRevision?: number;
+  variants?: Record<string, string>;
 }
 
 interface StoredAttempts {
@@ -95,9 +98,10 @@ export default function DictationPanel({
     for (const sentence of sentences) {
       const attempt = attempts[sentence.id];
       if (attempt?.checked) {
+        const expected = attempt.expected ?? sentence.zh;
         let cached = scoreCache.current.get(sentence.id);
-        if (!cached || cached.zh !== sentence.zh || cached.typed !== attempt.typed || cached.policy !== (attempt.scriptPolicy ?? "source")) {
-          cached = { zh: sentence.zh, typed: attempt.typed, policy: attempt.scriptPolicy ?? "source", result: scoreAttempt(sentence.zh, attempt.typed, attempt.scriptPolicy === "equivalent" ? sentence.script_variants : {}) };
+        if (!cached || cached.zh !== expected || cached.typed !== attempt.typed || cached.policy !== (attempt.scriptPolicy ?? "source")) {
+          cached = { zh: expected, typed: attempt.typed, policy: attempt.scriptPolicy ?? "source", result: scoreAttempt(expected, attempt.typed, attempt.scriptPolicy === "equivalent" ? attempt.variants ?? sentence.script_variants : {}) };
           scoreCache.current.set(sentence.id, cached);
         }
         out[sentence.id] = cached.result;
@@ -141,9 +145,9 @@ export default function DictationPanel({
       const result = scoreAttempt(s.zh, a.typed, scriptPolicy === "equivalent" ? s.script_variants : {});
       track("review_outcome", {
         item_id: itemId, sentence_id: s.id, study_mode: "dictation",
-        data: { score: Math.round(result.score * 100), script_policy: scriptPolicy, task: "transcription" },
+        data: { score: Math.round(result.score * 100), script_policy: scriptPolicy, task: "transcription", source_revision: s.provenance?.revision ?? 0, expected_zh: s.zh },
       });
-      setAttempts((prev) => ({ ...prev, [ordinalKey]: { ...a, checked: true, scriptPolicy } }));
+      setAttempts((prev) => ({ ...prev, [ordinalKey]: { ...a, checked: true, scriptPolicy, expected: s.zh, sourceRevision: s.provenance?.revision ?? 0, variants: s.script_variants } }));
     },
     [itemId, attempts, scriptPolicy],
   );
@@ -254,6 +258,7 @@ export default function DictationPanel({
                 )}
               </div>
 
+              {attempt.checked && attempt.expected && attempt.expected !== s.zh && <p role="status" className="mt-2 text-xs text-amber-200">This line changed after your attempt. This score uses its original text. Edit your answer or reset to practice the revised line.</p>}
               {result && (
                 <div className="mt-2 pl-10">
                   <p className="font-zh text-base leading-relaxed">

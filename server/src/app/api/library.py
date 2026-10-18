@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
@@ -30,12 +30,14 @@ router = APIRouter()
 def stream_url(item: MediaItem, root_slug: str) -> str:
     # audio items stream the ingest-transcoded m4a (sample-accurate seeking),
     # never the original file under the root
+    meta = item.meta or {}
+    from ..ingest.remux import remux_current
     if item.kind == "audio":
-        return f"/media/audio/{item.id}.m4a"
+        return f"/media/audio/{item.id}.m4a?v={meta.get('m4a_revision', item.fingerprint or 'legacy')}"
     # non-direct-play video streams its cached remux once the fp matches
-    if ((item.meta or {}).get("remux") or {}).get("fp") == item.fingerprint:
-        return f"/media/remux/{item.id}.mp4"
-    return f"/media/{root_slug}/{quote(item.relpath)}"
+    if remux_current(item):
+        return f"/media/remux/{item.id}.mp4?v={meta['remux'].get('revision', item.fingerprint or 'legacy')}"
+    return f"/media/{root_slug}/{quote(item.relpath)}?v={item.fingerprint or 'legacy'}"
 
 
 def coverage_by_item(session: Session, item_ids: list[int]) -> dict[int, dict]:
@@ -136,7 +138,7 @@ def get_library(session: Session = Depends(get_session)):
         "continue": [
             {"item_id": i.id, "title": i.title, "series_id": i.series_id,
              "position_ms": p.position_ms, "duration_ms": i.duration_ms,
-             "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2", "updated_at": p.updated_at}
+             "thumb_url": f"/media/thumbs/{i.id}.jpg?v={i.fingerprint or 'legacy'}", "updated_at": p.updated_at}
             for p, i in cont
         ],
     }
@@ -182,7 +184,7 @@ def recommendations(session: Session = Depends(get_session)):
                 "series_title": series_titles.get(i.series_id),
                 "ordinal": i.ordinal,
                 "duration_ms": i.duration_ms,
-                "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2",
+                "thumb_url": f"/media/thumbs/{i.id}.jpg?v={i.fingerprint or 'legacy'}",
                 "coverage": c["coverage"],
                 "unknown_lexemes": c["unknown_lexemes"],
             }
@@ -193,8 +195,11 @@ def recommendations(session: Session = Depends(get_session)):
 
 @router.post("/roots")
 def add_root(body: RootIn, session: Session = Depends(get_session)):
-    if body.slug in ("thumbs", "audio") or "/" in body.slug or not body.slug.isascii():
-        raise HTTPException(400, "invalid slug")
+    from ..config import validate_root_slug
+    try:
+        validate_root_slug(body.slug)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
     if session.scalar(select(MediaRoot).where(MediaRoot.slug == body.slug)):
         raise HTTPException(409, "slug exists")
     root = MediaRoot(slug=body.slug, kind=body.kind, path=body.path, include_glob=body.include_glob)
@@ -237,7 +242,7 @@ def get_series(series_id: int, session: Session = Depends(get_session)):
                 "id": i.id, "title": i.title, "ordinal": i.ordinal,
                 "duration_ms": i.duration_ms, "ready": i.ready, "available": i.available,
                 "has_zh": i.id in has_zh,
-                "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2",
+                "thumb_url": f"/media/thumbs/{i.id}.jpg?v={i.fingerprint or 'legacy'}",
                 "position_ms": progress[i.id].position_ms if i.id in progress else 0,
                 "completed": progress[i.id].completed if i.id in progress else False,
                 **cov.get(i.id, {}),
@@ -283,16 +288,21 @@ def get_item(item_id: int, session: Session = Depends(get_session)):
         )
         rewatch_nudge = (recent_lookups or 0) < 5
 
+    from ..tracks import choose_tracks, available
+    chosen = choose_tracks(session, item, persist=False)
     return {
+        "active_tracks": {language: track.id if track else None for language, track in chosen.items()},
+        "source_status": (item.meta or {}).get("source_status"),
         "id": item.id, "title": item.title, "kind": item.kind, "ordinal": item.ordinal,
         "duration_ms": item.duration_ms, "ready": item.ready, "available": item.available,
         "width": item.width, "height": item.height,
         "series": {"id": series.id, "title": series.title, "level": series.level_hint} if series else None,
         "stream_url": stream_url(item, root.slug),
-        "thumb_url": f"/media/thumbs/{item.id}.jpg?v=2",
+        "thumb_url": f"/media/thumbs/{item.id}.jpg?v={item.fingerprint or 'legacy'}",
         "tracks": [
             {"id": t.id, "lang": t.lang, "source": t.source, "format": t.format,
-             "offset_ms": t.offset_ms, "selected": t.selected}
+             "offset_ms": t.offset_ms, "selected": t.selected, "available": available(t),
+             "label": t.relpath or f"{t.source} stream {(t.meta or {}).get('stream_index', '')}"}
             for t in tracks
         ],
         "n_sentences": n_sentences,
@@ -319,6 +329,10 @@ def patch_track(track_id: int, body: TrackPatch, session: Session = Depends(get_
     if track is None:
         raise HTTPException(404)
     track.offset_ms = max(-30_000, min(30_000, body.offset_ms))
+    from ..corrections import bump_revision
+    bump_revision(session.get(MediaItem, track.item_id))
+    if track.lang == "en":
+        enqueue(session, "ingest_item", {"item_id": track.item_id})
     session.commit()
     return {"id": track.id, "offset_ms": track.offset_ms}
 
@@ -332,4 +346,41 @@ def transcribe_item(item_id: int, session: Session = Depends(get_session)):
     if item.kind != "video":
         raise HTTPException(400, "podcasts align via their transcript")
     job = enqueue(session, "whisper_transcribe", {"item_id": item_id})
+    return {"queued": job is not None}
+
+
+class TrackSelection(BaseModel):
+    zh_track_id: int = Field(gt=0)
+    en_track_id: int | None = Field(default=None, gt=0)
+
+
+@router.post("/items/{item_id}/tracks")
+def select_tracks(item_id: int, body: TrackSelection, session: Session = Depends(get_session)):
+    from ..tracks import available, choose_tracks
+    item = session.get(MediaItem, item_id)
+    if item is None:
+        raise HTTPException(404)
+    for language, track_id in (("zh", body.zh_track_id), ("en", body.en_track_id)):
+        if track_id is None:
+            continue
+        track = session.get(TextTrack, track_id)
+        if track is None or track.item_id != item.id or track.lang != language or not available(track):
+            raise HTTPException(400, "Choose an available track for this item and language")
+    item.meta = {**(item.meta or {}), "track_choices": {"zh": body.zh_track_id, "en": body.en_track_id},
+                 "source_status": "Updating transcript from selected tracks"}
+    choose_tracks(session, item)
+    item.ready = False
+    enqueue(session, "ingest_item", {"item_id": item.id})
+    return {"queued": True}
+
+
+@router.post("/items/{item_id}/repair-media")
+def repair_media(item_id: int, session: Session = Depends(get_session)):
+    item = session.get(MediaItem, item_id)
+    if item is None:
+        raise HTTPException(404)
+    if not item.available:
+        raise HTTPException(409, "Reconnect the source media root, then scan it again")
+    kind = "repair_media"
+    job = enqueue(session, kind, {"item_id": item.id})
     return {"queued": job is not None}

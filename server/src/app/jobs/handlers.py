@@ -93,7 +93,7 @@ def whisper_transcribe(session: Session, payload: dict, progress) -> dict:
 def remux_item_handler(session: Session, payload: dict, progress) -> dict:
     from ..ingest.remux import remux_item
 
-    return remux_item(session, payload["item_id"], progress)
+    return remux_item(session, payload["item_id"], progress, force=bool(payload.get("force")))
 
 
 @handler("translate_item")
@@ -140,3 +140,20 @@ def fts_backfill(session: Session, payload: dict, progress) -> dict:
         session.commit()
         progress(f"indexed {min(i + 500, len(ids))}/{len(ids)}")
     return {"sentences": len(ids)}
+
+
+@handler("repair_media")
+def repair_media(session: Session, payload: dict, progress) -> dict:
+    from pathlib import Path
+    from ..models import MediaItem
+    from ..ingest.remux import remux_item
+    from ..ingest.podcast import transcode_m4a
+    item = session.get(MediaItem, payload["item_id"])
+    if item is None or not item.available:
+        return {"skipped": "source unavailable"}
+    if item.kind == "video":
+        return remux_item(session, item.id, progress, force=True)
+    root = session.get(MediaRoot, item.root_id)
+    transcode_m4a(Path(root.path) / item.relpath, item, force=True)
+    session.commit()
+    return {"repaired": item.id}
