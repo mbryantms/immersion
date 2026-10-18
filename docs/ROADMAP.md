@@ -2,7 +2,7 @@
 
 Immersion should help a learner understand authentic Mandarin, recognise it again in unfamiliar contexts, and retain useful vocabulary. This roadmap turns the application audit into a dependency-ordered delivery plan for a single local installation. Learning correctness, usable study flows, and recovery of personal learning data take precedence over adding more features.
 
-Baseline: `bb338a3181e0f339ba797be963644800a701ec1d`. Updated 18 October 2026. Work on this branch is the first delivery slice; this document is not a claim that every milestone is complete.
+Baseline: `bb338a3181e0f339ba797be963644800a701ec1d`. Updated 18 October 2026. Work on this branch includes the initial delivery and the canonical-forms/selected-readings phase; this document is not a claim that every milestone is complete.
 
 ## Delivery decisions
 
@@ -34,7 +34,7 @@ These are planning ranges, not committed dates. Re-estimate after M1 and after t
 | ID | Issue and implementation | Status | Acceptance criteria |
 | --- | --- | --- | --- |
 | P01 | Replace recall-only dictation scores with normalised edit distance, counting insertions, substitutions, numbers, and names | Delivered | 我爱你/我不爱你 and repeated answers score below 100%; wrong digits and missing Latin names lose credit; client/server share regression cases |
-| P02 | Accept equivalent permitted script forms during dictation; distinguish transcription from comprehension | Planned, M2 | 学习/學習 is accepted under an explicit policy; original forms remain visible; ambiguous conversions are not silently accepted |
+| P02 | Accept equivalent permitted script forms during dictation; distinguish transcription from comprehension | Delivered | 学习/學習 is accepted under an explicit policy; original forms remain visible; ambiguous conversions are not silently accepted |
 | P03 | Enforce due eligibility, archive/graduation checks, atomic claim, and idempotent review requests | Delivered | Sequential/concurrent duplicate requests advance once; replaying the same request returns the stored outcome; future-due items return a recoverable conflict |
 | P04 | Make the 1/3/7-day ladder accurate | Delivered | Initial practice schedules 1 day, subsequent consecutive successes schedule 3 and 7 days; graduation follows the delayed reviews; a lapse restarts spaced success evidence |
 | P05 | Give reviews real answer feedback and saved-snapshot fallback | Delivered | Word answers show dictionary alternatives/pinyin when available; sentence translation is shown; missing feedback is explicit; orphaned live contexts retain text practice |
@@ -48,15 +48,15 @@ These are planning ranges, not committed dates. Re-estimate after M1 and after t
 
 | ID | Issue and implementation | Status | Acceptance criteria |
 | --- | --- | --- | --- |
-| L01 | Introduce occurrence offsets and canonical lookup forms while preserving source text | Planned | Simplified/traditional subtitles share appropriate dictionary identity; text selection uses offsets rather than first substring; Unicode supplementary Han characters work |
-| L02 | Stop traditional source words from shattering in simplified-keyed reconciliation | Planned | 學習, 銀行, 音樂 resolve as intended words with correct contextual readings; reanalysis preserves original text and saved contexts |
-| L03 | Store contextual pronunciation separately from first dictionary reading | Planned | Subtitle ruby, lookup, review, and exported pinyin agree; 还/长/行/重/地 fixtures cover multiple contexts; alternatives are labelled rather than silently substituted |
-| L04 | Store selected meaning and reading on a saved learning item | Planned | 会 as ability and 会 as meeting can be learned separately; one sense does not automatically establish all readings/meanings |
+| L01 | Introduce occurrence offsets and canonical lookup forms while preserving source text | Partial | Simplified/traditional subtitles share appropriate dictionary identity; text selection uses offsets rather than first substring; Unicode supplementary Han characters work |
+| L02 | Stop traditional source words from shattering in simplified-keyed reconciliation | Delivered | 學習, 銀行, 音樂 resolve as intended words with correct contextual readings; reanalysis preserves original text and saved contexts |
+| L03 | Store contextual pronunciation separately from first dictionary reading | Partial | Subtitle ruby, lookup, review, and exported pinyin agree; 还/长/行/重/地 fixtures cover multiple contexts; alternatives are labelled rather than silently substituted |
+| L04 | Store selected meaning and reading on a saved learning item | Delivered | 会 as ability and 会 as meeting can be learned separately; one sense does not automatically establish all readings/meanings |
 | L05 | Explain lexical tones versus connected speech | Planned | Optional notes cover third-tone sandhi, 一/不, neutral tone, and erhua; dictionary notation is labelled; no fabricated word-level timing is presented as exact |
 | L06 | Let users correct text, reading, meaning, and timing locally | Planned | Corrections have provenance/revision history, survive rescans, and propagate to search, review, cache, and export; reset original is reversible |
 | L07 | Handle segmentation exceptions and multiword constructions | Planned | Separable verbs and constructions can span tokens; user corrections and per-series names do not corrupt dictionary vocabulary |
 | L08 | Improve regional/script presentation and character practice | Planned | Traditional preferences apply consistently to word pages/examples; source region can be recorded; components, phonetic families, and confusing forms aid reading; handwriting is optional |
-| L09 | Preserve code-switching text and meaningful spaces | Planned | 我是 Nathan and English passages remain readable after sentence splitting; numbers and names remain assessable |
+| L09 | Preserve code-switching text and meaningful spaces | Partial | 我是 Nathan and English passages remain readable after sentence splitting; numbers and names remain assessable |
 
 Migration strategy: add nullable canonical/occurrence/sense fields; backfill in bounded jobs; compare against original text and token offsets before switching reads; preserve legacy IDs through an explicit mapping. Do not overwrite original sentence text with OpenCC output. Back up the database before migration and verify restore before rollout.
 
@@ -123,7 +123,7 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 
 | ID | Issue and implementation | Status | Acceptance criteria |
 | --- | --- | --- | --- |
-| A01 | Export selected contextual pronunciation and meaning | Planned | Edited sense/reading and corrected sentence survive preview/export; exact source audio has effective timing; card front/back correspond to the intended skill |
+| A01 | Export selected contextual pronunciation and meaning | Partial | Edited sense/reading and corrected sentence survive preview/export; exact source audio has effective timing; card front/back correspond to the intended skill |
 | A02 | Make Anki schema/deck/field mappings configurable | Planned | Preflight identifies missing note type/fields/Anki; configuration is validated and saved; duplicate handling is explicit; default personal note type is optional |
 | A03 | Reconcile Anki evidence over time | Planned | Deleted/lapsed/suspended/nonmatching cards update derived evidence appropriately; reading-card maturity is not treated as listening mastery; manual precedence remains explainable |
 | A04 | Keep graduates awaiting export visible | Partial | Dashboard excludes archived/already-linked graduates. Add a persistent export inbox, explicit deferred/exported choices, and recovery after an interrupted export |
@@ -155,8 +155,14 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 
 ## Recommended next pull requests
 
-1. **Canonical forms and selected readings:** L01–L04 and P02, including both-script corpus fixtures and reanalysis migration.
+1. **Canonical forms and selected readings follow-up:** reconcile legacy duplicate lexeme IDs without conflating learning evidence; improve automatic polyphone/particle disambiguation and correct spans that change segmentation. The first implementation of L01–L04 and P02 is delivered; see [Mandarin phase delivery](MANDARIN_REPRESENTATION.md).
 2. **Reliable source media and corrections:** L06, D01 completion, D07–D13, and G06–G07.
 3. **Evidence-based learner model:** K01–K06, with migration preserving original events and Anki evidence.
 4. **Guided scenes and grammar:** G01–G05, validated question generation, and hint-aware outcomes.
 5. **Daily-use polish and retention:** remaining U items, A01–A04, O01–O03, and measured performance improvements.
+
+## Canonical forms and selected readings delivery
+
+See [implementation, migration, verification, and limitations](MANDARIN_REPRESENTATION.md). This phase adds source offsets in Unicode codepoints, dictionary-backed traditional aliases, normalized tokenizer input mapped back to original text, context-level pinyin estimates, explicit per-definition saves, occurrence-specific reading replay, and conservative opt-in dictation script pairs. A sense-specific graduation never marks the whole lexeme known. Existing source text, sentence IDs, events, and saved IDs are preserved by the additive migration and in-place backfill.
+
+L01 remains partial because historical duplicate lexeme IDs are retained rather than automatically combining their knowledge/events. L03 remains partial because automatic pronunciation is not a validated linguistic analysis; fixtures improve known cases but particles and ambiguous contexts still require a selected reading. L09 covers the analysis/sentence-splitting path; subtitle ingestion paths still need a full spacing audit. A01 now exports selected reading/meaning and contextual sentence pinyin; live Anki/media validation remains pending. Full M2 also includes L05–L08, which remain planned.

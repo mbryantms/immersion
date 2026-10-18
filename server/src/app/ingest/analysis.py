@@ -22,6 +22,7 @@ from ..lingua.pipeline import analyze_sentences
 from ..models import (
     MediaItem,
     SavedContext,
+    SavedItem,
     Sentence,
     Series,
     SeriesName,
@@ -38,7 +39,7 @@ def numbered_pinyin(word: str) -> str:
     return " ".join(s[0] for s in py(word, style=Style.TONE3, neutral_tone_with_five=True))
 
 
-CJK_RE = re.compile(r"[㐀-鿿]")
+CJK_RE = re.compile(r"[㐀-鿿\U00020000-\U000323AF]")
 
 
 def fts_row(sentence: Sentence) -> tuple:
@@ -46,10 +47,10 @@ def fts_row(sentence: Sentence) -> tuple:
     space-joined HanLP tokens, space-joined chars (substring matches via
     phrase queries), traditional tokens, toneless pinyin, english."""
     words = (sentence.analysis or {}).get("words", [])
-    zh_words = " ".join(w["t"] for w in words if w["type"] == "zh")
-    zh_chars = " ".join(ch for ch in sentence.zh if CJK_RE.match(ch))
+    zh_words = " ".join(w.get("canonical", convert.t2s(w["t"])) for w in words if w["type"] == "zh")
+    zh_chars = " ".join(ch for ch in convert.t2s(sentence.zh) if CJK_RE.match(ch))
     trad_words = " ".join(w.get("tr", w["t"]) for w in words if w["type"] == "zh")
-    toneless = " ".join(s[0] for s in py(sentence.zh, style=Style.NORMAL) if s[0].strip())
+    toneless = " ".join(s[0] for s in py(convert.t2s(sentence.zh), style=Style.NORMAL) if s[0].strip())
     return (sentence.id, zh_words, zh_chars, trad_words, toneless, sentence.en or "")
 
 
@@ -74,6 +75,9 @@ def get_or_create_lexemes(
 
     names = names or {}
     ids: dict[str, int] = {}
+    cedict = load_cedict()
+    canonical = {surface: cedict.canonical(surface) for surface in surfaces}
+    surfaces = set(canonical.values())
     todo = list(surfaces)
     for i in range(0, len(todo), 900):
         chunk = todo[i : i + 900]
@@ -99,7 +103,7 @@ def get_or_create_lexemes(
         session.flush()
         for lex in session.scalars(select(Lexeme).where(Lexeme.simplified.in_(missing))):
             ids[lex.simplified] = lex.id
-    return ids
+    return {surface: ids[key] for surface, key in canonical.items()}
 
 
 def series_name_lexicon(session: Session, item: MediaItem) -> dict[str, str]:
@@ -145,8 +149,13 @@ def link_words(zh: str, words: list[dict], lex_ids: dict[str, int]) -> str:
     traditional sentence."""
     spans, pos = [], 0
     for w in words:
-        spans.append((pos, pos + len(w["t"])))
-        pos += len(w["t"])
+        start = w.get("start", zh.find(w["t"], pos))
+        end = w.get("end", start + len(w["t"]))
+        if start < pos or zh[start:end] != w["t"]:
+            raise ValueError("Token offsets do not match source text")
+        w["start"], w["end"] = start, end
+        spans.append((start, end))
+        pos = end
     trad, trad_toks = convert.sentence_traditional(zh, spans)
     for w, tr in zip(words, trad_toks):
         if w["type"] == "zh":
@@ -156,11 +165,48 @@ def link_words(zh: str, words: list[dict], lex_ids: dict[str, int]) -> str:
     return trad
 
 
+def selected_readings(session: Session, item_id: int) -> dict:
+    selections = {}
+    for context, saved in session.execute(
+        select(SavedContext, SavedItem).join(SavedItem)
+        .where(SavedContext.snapshot["item_id"].as_integer() == item_id)
+        .order_by(SavedContext.added_at)
+    ):
+        snap = context.snapshot or {}
+        readings = snap.get("selected_occurrences") or {}
+        if not readings and snap.get("occurrence_start") is not None:
+            readings = {str(snap["occurrence_start"]): snap.get("selected_reading") or saved.selected_reading}
+        for start, reading in readings.items():
+            if reading:
+                selections.setdefault((snap.get("zh"), snap.get("sentence_ord")), []).append((snap, int(start), reading))
+    return selections
+
+
+def restore_selected_readings(selections: dict, zh: str, words: list[dict], ordinal: int) -> None:
+    """Replay explicit occurrence readings only against the exact source revision.
+
+    No first-substring matching: repeated lines use their original ordinal and
+    tokens must retain the same surface and offset. Resegmented spans are left
+    unchanged rather than applying a correction to a different word.
+    """
+    from ..lingua.readings import set_reading
+    for snap, start, reading in selections.get((zh, ordinal), []):
+        original = next((w for w in (snap.get("analysis") or {}).get("words", []) if w.get("start") == start), None)
+        for i, word in enumerate(words):
+            if original and word.get("start") == start and word["t"] == original["t"]:
+                try:
+                    words[i] = set_reading(word, reading)
+                except ValueError:
+                    pass  # retain legacy snapshots with non-syllabic readings
+
+
 def token_occurrences(item_id: int, sentences: list[Sentence]) -> list[TokenOccurrence]:
     return [
         TokenOccurrence(
             sentence_id=s.id, idx=i, item_id=item_id,
             surface=w["t"], lexeme_id=w["lex"],
+            start_offset=w.get("start"), end_offset=w.get("end"),
+            canonical=w.get("canonical"), reading=w.get("reading"),
         )
         for s in sentences
         for i, w in enumerate(s.analysis["words"])
@@ -199,9 +245,11 @@ def write_sentences(
     session.execute(delete(TokenOccurrence).where(TokenOccurrence.item_id == item.id))
     session.execute(delete(Sentence).where(Sentence.item_id == item.id))
 
+    selections = selected_readings(session, item.id)
     sentences: list[Sentence] = []
     for ord_, (seg, words) in enumerate(zip(segments, words_per_seg)):
         trad = link_words(seg.text, words, lex_ids)
+        restore_selected_readings(selections, seg.text, words, ord_)
         en_text, conf = en[ord_] if en else (None, 0.0)
         sentences.append(Sentence(
             item_id=item.id, track_id=track.id, ordinal=ord_,
@@ -257,8 +305,11 @@ def reanalyze_item(session: Session, item_id: int, progress=lambda msg: None) ->
     name_words = {w["t"]: w["ne"] for words in words_per_seg for w in words if w.get("ne")}
     lex_ids = get_or_create_lexemes(session, surfaces, name_words)
 
+    selections = selected_readings(session, item.id)
     for s, words in zip(sentences, words_per_seg):
-        link_words(s.zh, words, lex_ids)
+        trad = link_words(s.zh, words, lex_ids)
+        restore_selected_readings(selections, s.zh, words, s.ordinal)
+        s.trad = trad if trad != s.zh else None
         s.analysis = {"words": words}
 
     session.execute(delete(TokenOccurrence).where(TokenOccurrence.item_id == item.id))

@@ -69,3 +69,9 @@ npm run test:ui
 From `server/`, run `uv run pytest` with Python 3.12 and the development dependencies installed. The browser tests intercept API calls, so they exercise production UI behaviour deterministically; the backend suite separately exercises the actual SQLite/API logic. The included tiny MP4 is a generated colour-and-tone fixture with no personal or third-party media.
 
 No database schema migration is introduced in this delivery. Existing graduated items are preserved; the revised due/spacing policy applies to subsequent submissions. Full script-equivalent dictation, contextual pronunciation, and sense-specific knowledge remain explicitly scheduled in the roadmap.
+
+## Canonical forms / selected readings follow-up
+
+The next delivery adds a radio choice per dictionary definition, separate automatic-context reading copy, selected reading/meaning on saved cards, and an explicit dictation script policy selector. The existing React/Radix dialog retains focus trapping and a scrollable body. A 390px production-UI inspection confirmed readable choices and reachable footer actions; see [selected meaning](screenshots/selected-meaning-mobile.png).
+
+The current combined validation is 121 backend tests, 26 frontend unit tests, and 29 Chromium checks. The added interaction checks verify permitted script entry, exact meaning/reading/occurrence save payload, and selecting the second repeated source word while excluding ruby. The existing dictionary-dialog accessibility scan also covers the new radio choices. See [migration and language limitations](MANDARIN_REPRESENTATION.md).

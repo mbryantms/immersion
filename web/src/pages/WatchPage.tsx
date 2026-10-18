@@ -1,3 +1,4 @@
+import { sourceSelection } from "../gloss/selection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -263,15 +264,12 @@ function WatchSession() {
   const onMouseUp = useCallback(() => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) return;
-    const text = sel.toString().trim();
-    if (!text || text.length > 12 || !/[㐀-鿿]/.test(text)) return;
-    const node = sel.anchorNode?.parentElement?.closest("[data-sentence-id]");
-    const sid = node ? Number(node.getAttribute("data-sentence-id")) : NaN;
-    const sentence = sentences.find((s) => s.id === sid) ?? current;
+    if (!sel.rangeCount) return;
+    const selected = sourceSelection(sel.getRangeAt(0));
+    if (!selected || selected.end - selected.start > 12) return;
+    const sentence = sentences.find((s) => s.id === selected.sentenceId);
     if (!sentence) return;
-    const start = sentence.zh.indexOf(text);
-    if (start < 0) return;
-    post<LookupResult>("/lookup", { sentence_id: sentence.id, start, end: start + text.length })
+    post<LookupResult>("/lookup", { sentence_id: sentence.id, start: selected.start, end: selected.end })
       .then((res) => {
         if (res.candidates.length) {
           videoRef.current?.pause();
@@ -282,9 +280,9 @@ function WatchSession() {
   }, [sentences, current]);
 
   const saveWord = useCallback(
-    (lexemeId: number, surface: string, sentenceId: number) => {
+    (lexemeId: number, surface: string, sentenceId: number, selection?: { selected_reading?: string; selected_meaning?: string; occurrence_start?: number }) => {
       saveItem.mutate(
-        { kind: "word", lexeme_id: lexemeId, surface, sentence_id: sentenceId },
+        { kind: "word", lexeme_id: lexemeId, surface, sentence_id: sentenceId, ...selection },
         {
           onSuccess: (r) => toast.success(r.created ? `Saved ${surface}` : `${surface} — added this context`),
           onError: () => toast.error(`Couldn't save ${surface}`),

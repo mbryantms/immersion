@@ -17,6 +17,7 @@ import type { MediaEl } from "./useSentenceClock";
 interface Attempt {
   typed: string;
   checked: boolean;
+  scriptPolicy?: "source" | "equivalent";
 }
 
 interface StoredAttempts {
@@ -50,6 +51,7 @@ export default function DictationPanel({
   onArmSentence,
 }: Props) {
   const storageKey = `dict:${itemId}`;
+  const [scriptPolicy, setScriptPolicy] = useState<"source" | "equivalent">("source");
   const [storageError, setStorageError] = useState(false);
   const [attempts, setAttempts] = useState<Record<number, Attempt>>(() => {
     try {
@@ -87,15 +89,15 @@ export default function DictationPanel({
       try { localStorage.setItem(storageKey, JSON.stringify({ version: 2, attempts: latestAttempts.current } satisfies StoredAttempts)); } catch { /* retain in memory until unmount */ }
     };
   }, [persistAttempts, storageKey]);
-  const scoreCache = useRef(new Map<number, { zh: string; typed: string; result: DictationResult }>());
+  const scoreCache = useRef(new Map<number, { zh: string; typed: string; policy: string; result: DictationResult }>());
   const results = useMemo(() => {
     const out: Record<number, DictationResult> = {};
     for (const sentence of sentences) {
       const attempt = attempts[sentence.id];
       if (attempt?.checked) {
         let cached = scoreCache.current.get(sentence.id);
-        if (!cached || cached.zh !== sentence.zh || cached.typed !== attempt.typed) {
-          cached = { zh: sentence.zh, typed: attempt.typed, result: scoreAttempt(sentence.zh, attempt.typed) };
+        if (!cached || cached.zh !== sentence.zh || cached.typed !== attempt.typed || cached.policy !== (attempt.scriptPolicy ?? "source")) {
+          cached = { zh: sentence.zh, typed: attempt.typed, policy: attempt.scriptPolicy ?? "source", result: scoreAttempt(sentence.zh, attempt.typed, attempt.scriptPolicy === "equivalent" ? sentence.script_variants : {}) };
           scoreCache.current.set(sentence.id, cached);
         }
         out[sentence.id] = cached.result;
@@ -136,14 +138,14 @@ export default function DictationPanel({
     (s: SentenceOut, ordinalKey: number) => {
       const a = attempts[ordinalKey];
       if (!a?.typed || a.checked) return;
-      const result = scoreAttempt(s.zh, a.typed);
+      const result = scoreAttempt(s.zh, a.typed, scriptPolicy === "equivalent" ? s.script_variants : {});
       track("review_outcome", {
         item_id: itemId, sentence_id: s.id, study_mode: "dictation",
-        data: { score: Math.round(result.score * 100) },
+        data: { score: Math.round(result.score * 100), script_policy: scriptPolicy, task: "transcription" },
       });
-      setAttempts((prev) => ({ ...prev, [ordinalKey]: { ...a, checked: true } }));
+      setAttempts((prev) => ({ ...prev, [ordinalKey]: { ...a, checked: true, scriptPolicy } }));
     },
-    [itemId, attempts],
+    [itemId, attempts, scriptPolicy],
   );
 
   const done = Object.values(attempts).filter((a) => a.checked).length;
@@ -160,7 +162,7 @@ export default function DictationPanel({
               </Badge>
             </div>
             <p className="mt-1 text-sm leading-relaxed text-stone-400">Play a line, type what you hear, then press Enter.</p>
-            <p className="mt-1 text-xs leading-relaxed text-stone-400">Names and numbers count. Punctuation and spaces are ignored; use the transcript’s character script.</p>
+            <p className="mt-1 text-xs leading-relaxed text-stone-400">This measures transcription, not comprehension. Names and numbers count; punctuation and spaces are ignored.</p>
           </div>
           {done > 0 && (
             <Button
@@ -175,6 +177,14 @@ export default function DictationPanel({
         </div>
       </div>
 
+      <label className="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3 text-xs text-stone-300">
+        Character script
+        <select value={scriptPolicy} onChange={(event) => setScriptPolicy(event.target.value as "source" | "equivalent")} className="min-h-11 rounded-md border border-white/20 bg-stone-900 px-2">
+          <option value="source">Match source script</option>
+          <option value="equivalent">Allow unambiguous simplified/traditional pairs</option>
+        </select>
+        <span>Ambiguous forms still require the source character. Checked attempts keep their original policy.</span>
+      </label>
       {storageError && <p role="status" className="border-b border-border px-4 py-3 text-sm text-amber-200">This browser could not save your attempts. Keep this page open to retain them.</p>}
 
       <div className="min-h-0 flex-1 overflow-y-auto">

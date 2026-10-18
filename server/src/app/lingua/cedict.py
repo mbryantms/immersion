@@ -18,6 +18,7 @@ class Cedict:
     def __init__(self, path: Path | None = None):
         # simplified -> list of (traditional, numbered_pinyin, [definitions])
         self.entries: dict[str, list[tuple[str, str, list[str]]]] = {}
+        self.aliases: dict[str, set[str]] = {}
         with open(path or settings.ref_dir / "cedict.txt", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("#"):
@@ -28,14 +29,22 @@ class Cedict:
                 trad, simp, pinyin, defs = m.groups()
                 definitions = [d for d in defs.split("/") if d and not d.startswith("see ")]
                 self.entries.setdefault(simp, []).append((trad, pinyin, definitions))
+                self.aliases.setdefault(trad, set()).add(simp)
+
+    def canonical(self, word: str) -> str:
+        # Exact dictionary forms outrank a lossy global script conversion.
+        if word in self.entries:
+            return word
+        candidates = self.aliases.get(word, set())
+        return next(iter(candidates)) if len(candidates) == 1 else word
 
     def __contains__(self, word: str) -> bool:
-        return word in self.entries
+        return self.canonical(word) in self.entries
 
     def gloss(self, word: str, max_defs: int = 4) -> list[dict]:
         """All senses for a word, trimmed for popover display."""
         out = []
-        for _trad, pinyin, defs in self.entries.get(word, []):
+        for _trad, pinyin, defs in self.entries.get(self.canonical(word), []):
             if not defs:
                 continue
             out.append({"py": pinyin, "defs": defs[:max_defs]})
@@ -43,18 +52,18 @@ class Cedict:
 
     def traditional(self, word: str) -> str | None:
         """First-listed traditional form."""
-        senses = self.entries.get(word)
+        senses = self.entries.get(self.canonical(word))
         return senses[0][0] if senses else None
 
     def pinyin(self, word: str) -> str | None:
-        senses = self.entries.get(word)
+        senses = self.entries.get(self.canonical(word))
         return senses[0][1] if senses else None
 
     def longest_match(self, text: str, start: int, max_len: int = 8) -> str | None:
         """Longest dictionary word in text beginning at start."""
         end = min(len(text), start + max_len)
         for stop in range(end, start, -1):
-            if text[start:stop] in self.entries:
+            if text[start:stop] in self:
                 return text[start:stop]
         return None
 

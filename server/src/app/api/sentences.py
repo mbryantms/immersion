@@ -14,7 +14,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
-from ..lingua.convert import zh_norm
+from ..lingua.convert import zh_norm, t2s
+from ..lingua.script_policy import script_variants
 from ..models import (
     AnkiSentence,
     KnowledgeState,
@@ -43,12 +44,20 @@ def _anki_matches(session: Session, rows: list[Sentence]) -> set[int]:
     return hits
 
 
-def _slim_words(analysis: dict | None) -> list[dict]:
+def _slim_words(analysis: dict | None, source: str | None = None) -> list[dict]:
     """Trim inline CEDICT glosses to one sense / two defs: full glosses are
     ~60% of the payload, but the gloss sheet only needs an instant placeholder
     until /lexemes/{id} returns the real entry."""
     out = []
+    cursor = 0
     for w in (analysis or {}).get("words", []):
+        if source is not None and "start" not in w:
+            start = source.find(w["t"], cursor)
+            if start >= 0:
+                w = {**w, "start": start, "end": start + len(w["t"])}
+                cursor = w["end"]
+        else:
+            cursor = w.get("end", cursor)
         gloss = w.get("gloss")
         if gloss:
             first = gloss[0]
@@ -107,7 +116,8 @@ def get_sentences(
                 "t1": max(0, s.t1_ms + offsets.get(s.track_id, 0)),
                 "en": s.en, "conf": s.align_conf,
                 "anki": s.id in in_anki or None,
-                "words": _slim_words(s.analysis),
+                "words": _slim_words(s.analysis, s.zh),
+                "script_variants": script_variants(s.zh),
             }
             for s in rows
         ],
@@ -180,15 +190,18 @@ def lookup(body: LookupIn, session: Session = Depends(get_session)):
     sentence = session.get(Sentence, body.sentence_id)
     if sentence is None:
         raise HTTPException(404)
+    if body.start < 0 or body.end <= body.start or body.end > len(sentence.zh):
+        raise HTTPException(400, "bad span")
     span = sentence.zh[body.start : body.end]
     if not span or len(span) > 12:
         raise HTTPException(400, "bad span")
-    subs = {span[i:j] for i in range(len(span)) for j in range(i + 1, len(span) + 1)}
+    canonical = t2s(span)
+    subs = {canonical[i:j] for i in range(len(canonical)) for j in range(i + 1, len(canonical) + 1)}
     lexes = session.scalars(select(Lexeme).where(Lexeme.simplified.in_(list(subs)))).all()
-    lexes.sort(key=lambda l: (l.simplified != span, -len(l.simplified)))
+    lexes.sort(key=lambda lex: (lex.simplified != canonical, -len(lex.simplified)))
     return {
         "span": span,
-        "candidates": [_lexeme_payload(session, l) for l in lexes[:10]],
+        "candidates": [_lexeme_payload(session, lex) for lex in lexes[:10]],
     }
 
 

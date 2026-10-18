@@ -115,6 +115,10 @@ class TokenOccurrence(Base):
     idx: Mapped[int] = mapped_column(Integer, primary_key=True)  # word index within sentence
     item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))  # denormalized for coverage
     surface: Mapped[str] = mapped_column(String)
+    start_offset: Mapped[int | None] = mapped_column(Integer)  # Unicode codepoints, half-open
+    end_offset: Mapped[int | None] = mapped_column(Integer)
+    canonical: Mapped[str | None] = mapped_column(String)
+    reading: Mapped[str | None] = mapped_column(String)
     lexeme_id: Mapped[int] = mapped_column(ForeignKey("lexeme.id"))
     __table_args__ = (
         Index("ix_tokocc_lexeme", "lexeme_id"),
@@ -203,6 +207,9 @@ class SavedItem(Base):
     kind: Mapped[str] = mapped_column(String)  # 'word' | 'sentence'
     lexeme_id: Mapped[int | None] = mapped_column(ForeignKey("lexeme.id"))
     surface: Mapped[str | None] = mapped_column(String)  # as saved (custom spans differ from lexeme)
+    selected_reading: Mapped[str | None] = mapped_column(String)
+    selected_meaning: Mapped[str | None] = mapped_column(Text)
+    selection_source: Mapped[str | None] = mapped_column(String)
     note: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSON)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)

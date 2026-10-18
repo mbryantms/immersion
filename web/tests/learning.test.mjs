@@ -21,3 +21,9 @@ test("every repeated cloze occurrence is masked", () => {
   assert.deepEqual(maskedParts("学习，再学习。", "学习"), ["", "，再", "。"]);
   assert.deepEqual(maskedParts("你好。", ""), ["你好。"]);
 });
+
+test("source-specific script pairs preserve strict default and source feedback", () => {
+  assert.ok(scoreAttempt("学习", "學習").score < 1);
+  assert.equal(scoreAttempt("学习", "學習", { "學": "学", "習": "习" }).score, 1);
+  assert.deepEqual(scoreAttempt("学习", "學習", { "學": "学", "習": "习" }).segments, [{ kind: "ok", text: "学习" }]);
+});

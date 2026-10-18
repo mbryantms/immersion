@@ -5,11 +5,11 @@ import { test as base } from "@playwright/test";
 const video = readFileSync(fileURLToPath(new URL("./fixtures/study.mp4", import.meta.url)));
 const image = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#173c34"/></svg>';
 export const words = [
-  { t: "学习", type: "zh", lex: 1, py: ["xué", "xí"], tones: [2, 2], gloss: [{ py: "xue2 xi2", defs: ["to study", "to learn"] }] },
-  { t: "，", type: "x" },
-  { t: "再", type: "zh", lex: 2, py: ["zài"], tones: [4], gloss: [{ py: "zai4", defs: ["again"] }] },
-  { t: "学习", type: "zh", lex: 1, py: ["xué", "xí"], tones: [2, 2], gloss: [{ py: "xue2 xi2", defs: ["to study"] }] },
-  { t: "。", type: "x" },
+  { t: "学习", start: 0, end: 2, reading: "xue2 xi2", type: "zh", lex: 1, py: ["xué", "xí"], tones: [2, 2], gloss: [{ py: "xue2 xi2", defs: ["to study", "to learn"] }] },
+  { t: "，", start: 2, end: 3, type: "x" },
+  { t: "再", start: 3, end: 4, type: "zh", lex: 2, py: ["zài"], tones: [4], gloss: [{ py: "zai4", defs: ["again"] }] },
+  { t: "学习", start: 4, end: 6, reading: "xue2 xi2", type: "zh", lex: 1, py: ["xué", "xí"], tones: [2, 2], gloss: [{ py: "xue2 xi2", defs: ["to study"] }] },
+  { t: "。", start: 6, end: 7, type: "x" },
 ];
 const zh = "学习，再学习。";
 const context = { sentence_id: 1, item_id: 1, item_kind: "video", item_available: true, stream_url: "/media/fixture.mp4", zh, en: "Study, then study again.", t0_ms: 0, t1_ms: 3500, words };
@@ -29,7 +29,7 @@ export const test = base.extend({
       if (path === "/library") payload = { roots: [], series: [series], continue: [] };
       else if (path === "/stats/dashboard") payload = { weeks: [], totals: { lookups: 1, sentences_played: 3, saves: 1 }, recurring_unknowns: [], review_due: 1, graduated_waiting: 0, anki: { last_import: null, last_export: null } };
       else if (path === "/recommendations") payload = { band: { low: 0.88, high: 0.985 }, fallback: false, items: [{ item_id: 1, title: item.title, kind: "video", series_id: 1, series_title: series.title, duration_ms: 4000, thumb_url: item.thumb_url, coverage: 0.92, unknown_lexemes: 2 }] };
-      else if (/^\/items\/\d+\/sentences$/.test(path)) payload = { item_id: Number(path.split("/")[2]), zh_offset_ms: 0, sentences: [{ id: 1, ord: 0, zh, tr: "學習，再學習。", t0: 0, t1: 3500, en: context.en, conf: 1, words }] };
+      else if (/^\/items\/\d+\/sentences$/.test(path)) payload = { item_id: Number(path.split("/")[2]), zh_offset_ms: 0, sentences: [{ id: 1, ord: 0, zh, tr: "學習，再學習。", t0: 0, t1: 3500, en: context.en, conf: 1, words, script_variants: { "學": "学", "習": "习" } }] };
       else if (/^\/items\/\d+$/.test(path)) payload = { ...item, id: Number(path.split("/")[2]), kind: path.endsWith("/2") ? "audio" : "video" };
       else if (path === "/knowledge") payload = { states: { 1: "learning", 2: "new" }, saved: [1] };
       else if (path === "/review/queue") payload = { due: 1, items: [{ saved_item_id: 1, kind: "word", surface: "学习", lexeme_id: 1, mode: "context", rung: 0, streak: 0, context, answer: { pinyin: "xue2 xi2", senses: lexeme.senses } }] };

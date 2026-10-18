@@ -5,8 +5,8 @@ survive re-ingestion."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..db import get_session
@@ -15,10 +15,12 @@ from ..models import (
     Event,
     KnowledgeState,
     MediaItem,
+    Lexeme,
     ReviewState,
     SavedContext,
     SavedItem,
     Sentence,
+    TokenOccurrence,
 )
 
 router = APIRouter()
@@ -29,6 +31,9 @@ class SaveIn(BaseModel):
     lexeme_id: int | None = None
     surface: str | None = None
     sentence_id: int | None = None
+    selected_reading: str | None = Field(default=None, max_length=160)
+    selected_meaning: str | None = Field(default=None, max_length=1000)
+    occurrence_start: int | None = Field(default=None, ge=0)
 
 
 def _snapshot(session: Session, sentence: Sentence) -> dict:
@@ -37,6 +42,7 @@ def _snapshot(session: Session, sentence: Sentence) -> dict:
         "item_id": sentence.item_id, "item_title": item.title if item else None,
         "sentence_ord": sentence.ordinal,
         "zh": sentence.zh, "en": sentence.en, "t0_ms": sentence.t0_ms, "t1_ms": sentence.t1_ms,
+        "analysis": sentence.analysis, "track_id": sentence.track_id,
     }
 
 
@@ -51,10 +57,42 @@ def save_item(body: SaveIn, session: Session = Depends(get_session)):
     if body.kind == "word":
         if body.lexeme_id is None:
             raise HTTPException(400, "word saves need lexeme_id")
+        if session.get(Lexeme, body.lexeme_id) is None:
+            raise HTTPException(404, "lexeme not found")
+        if body.selected_meaning is not None and not body.selected_meaning.strip():
+            raise HTTPException(400, "meaning cannot be blank")
+        if body.selected_reading is not None and not body.selected_reading.strip():
+            raise HTTPException(400, "reading cannot be blank")
+        if body.occurrence_start is not None:
+            from .sentences import _slim_words
+            originals = (sentence.analysis or {}).get("words", []) if sentence else []
+            located = _slim_words(sentence.analysis, sentence.zh) if sentence else []
+            # Reuse legacy offset recovery without persisting payload-trimmed glosses.
+            words = [{**original, **{key: located_word[key] for key in ("start", "end") if key in located_word}}
+                     for original, located_word in zip(originals, located)]
+            if not any(w.get("start") == body.occurrence_start and w.get("lex") == body.lexeme_id for w in words):
+                raise HTTPException(400, "occurrence does not match this word")
+            if body.selected_reading:
+                from ..lingua.readings import set_reading
+                try:
+                    words = [set_reading(w, body.selected_reading)
+                             if w.get("start") == body.occurrence_start and w.get("lex") == body.lexeme_id
+                             else w for w in words]
+                except ValueError as error:
+                    raise HTTPException(400, str(error)) from error
+                sentence.analysis = {**(sentence.analysis or {}), "words": words}
+                session.execute(update(TokenOccurrence).where(
+                    TokenOccurrence.sentence_id == sentence.id,
+                    TokenOccurrence.start_offset == body.occurrence_start,
+                ).values(reading=body.selected_reading))
+                media = session.get(MediaItem, sentence.item_id)
+                media.meta = {**(media.meta or {}), "analysis_rev": (media.meta or {}).get("analysis_rev", 0) + 1}
         item = session.scalar(
             select(SavedItem).where(
                 SavedItem.kind == "word",
                 SavedItem.lexeme_id == body.lexeme_id,
+                SavedItem.selected_reading == body.selected_reading,
+                SavedItem.selected_meaning == body.selected_meaning,
                 SavedItem.archived.is_(False),
             )
         )
@@ -75,6 +113,8 @@ def save_item(body: SaveIn, session: Session = Depends(get_session)):
     if created:
         item = SavedItem(
             kind=body.kind, lexeme_id=body.lexeme_id,
+            selected_reading=body.selected_reading, selected_meaning=body.selected_meaning,
+            selection_source="user" if body.selected_reading or body.selected_meaning else None,
             surface=body.surface or (sentence.zh if body.kind == "sentence" and sentence else None),
         )
         session.add(item)
@@ -97,10 +137,19 @@ def save_item(body: SaveIn, session: Session = Depends(get_session)):
                 SavedContext.saved_item_id == item.id, SavedContext.sentence_id == sentence.id
             )
         )
+        snapshot = {**_snapshot(session, sentence), "occurrence_start": body.occurrence_start,
+                    "selected_reading": body.selected_reading, "selected_meaning": body.selected_meaning}
+        occurrences = dict((dup.snapshot or {}).get("selected_occurrences", {})) if dup else {}
+        if body.occurrence_start is not None and body.selected_reading:
+            occurrences[str(body.occurrence_start)] = body.selected_reading
+        snapshot["selected_occurrences"] = occurrences
         if dup is None:
-            session.add(SavedContext(
-                saved_item_id=item.id, sentence_id=sentence.id, snapshot=_snapshot(session, sentence)
-            ))
+            session.add(SavedContext(saved_item_id=item.id, sentence_id=sentence.id, snapshot=snapshot))
+        elif body.selected_reading:
+            from datetime import datetime, timezone
+            dup.snapshot = snapshot
+            dup.added_at = datetime.now(timezone.utc)
+
     session.commit()
     return {"id": item.id, "created": created}
 
@@ -156,6 +205,8 @@ def list_saved(
             {
                 "id": i.id, "kind": i.kind, "lexeme_id": i.lexeme_id, "surface": i.surface,
                 "note": i.note, "tags": i.tags, "created_at": i.created_at,
+                "selected_reading": i.selected_reading, "selected_meaning": i.selected_meaning,
+                "selection_source": i.selection_source,
                 "contexts": ctxs.get(i.id, []),
                 "anki_note_id": links.get(i.id),
                 "review": ({

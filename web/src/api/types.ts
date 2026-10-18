@@ -2,6 +2,11 @@
 
 export interface Word {
   t: string;
+  canonical?: string;
+  start?: number; // Unicode codepoints, half-open source offsets
+  end?: number;
+  reading?: string;
+  reading_source?: string;
   type: "zh" | "x";
   py?: string[];
   tones?: number[];
@@ -22,6 +27,7 @@ export interface SentenceOut {
   conf: number | null;
   anki?: boolean; // already exists as an Anki card
   words: Word[];
+  script_variants?: Record<string, string>;
 }
 
 // The explanation arrives in two parallel halves: core (renders first) and
@@ -167,6 +173,8 @@ export interface SavedItemOut {
   kind: "word" | "sentence";
   lexeme_id: number | null;
   surface: string | null;
+  selected_reading?: string | null;
+  selected_meaning?: string | null;
   note: string | null;
   tags: string[] | null;
   created_at: string;
@@ -220,6 +228,7 @@ export interface ReviewContext {
   t0_ms: number;
   t1_ms: number;
   words: Word[];
+  script_variants?: Record<string, string>;
 }
 
 export interface ReviewItem {

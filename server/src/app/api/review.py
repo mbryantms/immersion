@@ -46,8 +46,8 @@ def _mark_known_on_graduation(session: Session, item: SavedItem) -> None:
     knowledge model (never overriding manual or Anki evidence)."""
     from ..models import KnowledgeState
 
-    if not item.lexeme_id:
-        return
+    if not item.lexeme_id or item.selected_reading or item.selected_meaning:
+        return  # One selected sense does not establish every meaning/reading.
     ks = session.get(KnowledgeState, item.lexeme_id)
     if ks is None:
         session.add(KnowledgeState(lexeme_id=item.lexeme_id, state="known",
@@ -59,7 +59,7 @@ def _mark_known_on_graduation(session: Session, item: SavedItem) -> None:
 def _fresh_context(session: Session, item: SavedItem) -> Sentence | None:
     """A concordance sentence that is NOT one of the saved contexts — later
     reviews should retrieve meaning in a new setting, not recognize the card."""
-    if not item.lexeme_id:
+    if not item.lexeme_id or item.selected_reading or item.selected_meaning:
         return None
     saved_sentence_ids = {c.sentence_id for c in item.contexts if c.sentence_id}
     rows = session.execute(
@@ -132,7 +132,7 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
                            "item_kind": None, "item_available": False, "stream_url": None,
                            "zh": snap["zh"], "en": snap.get("en"),
                            "t0_ms": snap.get("t0_ms", 0), "t1_ms": snap.get("t1_ms", 0),
-                           "words": []}
+                           "words": (snap.get("analysis") or {}).get("words", [])}
         lex = session.get(Lexeme, item.lexeme_id) if item.lexeme_id else None
         senses = session.scalars(select(Sense).where(Sense.lexeme_id == item.lexeme_id)
                                  .order_by(Sense.ord).limit(4)).all() if lex else []
@@ -145,8 +145,11 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
             "rung": rs.rung if rs else 0,
             "streak": rs.streak if rs else 0,
             "context": payload,
-            "answer": {"pinyin": lex.pinyin if lex else None,
-                       "senses": [{"py": sense.pinyin, "defs": sense.glosses} for sense in senses]},
+            "answer": {"pinyin": item.selected_reading or next((w.get("reading") for w in (payload or {}).get("words", [])
+                                if w.get("lex") == item.lexeme_id and w.get("reading")), lex.pinyin if lex else None),
+                       "senses": ([{"py": item.selected_reading, "defs": [item.selected_meaning]}]
+                                  if item.selected_meaning else
+                                  [{"py": sense.pinyin, "defs": sense.glosses} for sense in senses])},
         })
     return {"due": len(due), "items": out}
 

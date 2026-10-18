@@ -75,6 +75,9 @@ export function useSaveItem(itemId: number) {
       lexeme_id?: number;
       surface?: string;
       sentence_id?: number;
+      selected_reading?: string;
+      selected_meaning?: string;
+      occurrence_start?: number;
     }) => post<{ id: number; created: boolean }>("/saved-items", body),
     onMutate: async (body) => {
       // optimistic: the token's saved highlight should be instant, like the
@@ -96,6 +99,7 @@ export function useSaveItem(itemId: number) {
     },
     onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(["knowledge", itemId], ctx.prev),
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["sentences", itemId] });
       qc.invalidateQueries({ queryKey: ["knowledge", itemId] });
       qc.invalidateQueries({ queryKey: ["saved"] });
     },

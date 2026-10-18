@@ -4,7 +4,7 @@ scores locally for instant feedback; this is the server-side reference used by
 the review queue.
 
 Letters and numbers count; punctuation and spacing do not. Script equivalence
-will be handled by the canonical-forms workstream, not guessed here."""
+is optional and restricted to verified one-to-one pairs."""
 
 from __future__ import annotations
 
@@ -56,7 +56,13 @@ class DictationResult:
 PASS_SCORE = 0.95  # same threshold the reader UI marks green
 
 
-def score_attempt(expected_zh: str, typed: str) -> DictationResult:
+def score_attempt(expected_zh: str, typed: str, script_policy: str = "source") -> DictationResult:
+    if script_policy not in ("source", "equivalent"):
+        raise ValueError("unknown script policy")
+    if script_policy == "equivalent":
+        from .script_policy import script_variants
+        variants = script_variants(expected_zh)
+        typed = "".join(variants.get(ch, ch) for ch in typed)
     expected = norm_zh(expected_zh)
     typed_n = norm_zh(typed)
     ops = lcs_ops(expected, typed_n)

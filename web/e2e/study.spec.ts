@@ -56,7 +56,8 @@ test("failed review preserves the card and reuses its request UUID", async ({ pa
 
 test("gloss traps focus, closes with Escape, and restores the selected word", async ({ page }) => {
   await page.goto("/watch/1");
-  const word = page.getByRole("button", { name: "Look up 学习" }).first();
+  // Keep the locator on the transcript: the video overlay can mount after metadata arrives.
+  const word = page.locator('[data-sentence-id="1"]').last().getByRole("button", { name: "Look up 学习" }).first();
   await word.click();
   const dialog = page.getByRole("dialog", { name: "Definition for 学习" });
   await expect(dialog).toBeVisible();
@@ -93,6 +94,7 @@ test("study selector works from the keyboard and a new audio item starts a fresh
   await page.goto("/watch/1");
   await page.getByRole("radio", { name: "Read", exact: true }).focus();
   await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("radio", { name: "Listen", exact: true })).toBeFocused();
   await page.keyboard.press("Space");
   await expect(page.getByRole("radio", { name: "Listen", exact: true })).toBeChecked();
   await page.getByRole("button", { name: "Next episode" }).click();
@@ -113,3 +115,51 @@ for (const path of ["/", "/library", "/series/1", "/review", "/saved", "/search"
     await page.screenshot({ path: info.outputPath("mobile.png"), fullPage: true });
   });
 }
+
+test("dictation permits only explicitly enabled script variants", async ({ page }) => {
+  await page.goto("/watch/1");
+  await page.getByRole("radio", { name: "Dictate", exact: true }).click();
+  await page.getByRole("combobox", { name: "Character script" }).selectOption("equivalent");
+  const answer = page.getByRole("textbox", { name: "Dictation answer for sentence 1" });
+  await answer.fill("學習，再學習。");
+  await answer.press("Enter");
+  await expect(page.getByLabel("100 percent character accuracy")).toBeVisible();
+  await page.getByRole("combobox", { name: "Character script" }).selectOption("source");
+  await expect(page.getByLabel("100 percent character accuracy")).toBeVisible();
+});
+
+test("lookup saves a specific meaning, reading, and source occurrence", async ({ page }, info) => {
+  let saved: Record<string, unknown> | undefined;
+  await page.route("**/api/saved-items", async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ json: { id: 2, created: true } });
+  });
+  await page.goto("/watch/1");
+  await page.getByRole("button", { name: "Look up 学习", exact: true }).last().click();
+  await page.getByRole("radio", { name: "Learn meaning 2: to learn", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: info.outputPath("selected-meaning-mobile.png"), fullPage: true });
+  await page.getByRole("button", { name: "Save selected meaning" }).click();
+  await expect.poll(() => saved?.selected_meaning).toBe("to learn");
+  expect(saved?.selected_reading).toBe("xue2 xi2");
+  expect(saved?.occurrence_start).toBe(4);
+});
+
+test("source selection distinguishes repeated words and ignores ruby", async ({ page }) => {
+  let requested: { start: number; end: number } | undefined;
+  await page.route("**/api/lookup", async (route) => {
+    requested = route.request().postDataJSON();
+    await route.fulfill({ json: { span: "学习", candidates: [] } });
+  });
+  await page.goto("/watch/1");
+  await page.getByRole("button", { name: "Look up 学习", exact: true }).last().evaluate((token) => {
+    const spans = token.querySelectorAll("span[class^=t]");
+    const range = document.createRange();
+    range.setStart(spans[0].firstChild!, 0);
+    range.setEnd(spans[1].firstChild!, 1);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges(); selection.addRange(range);
+    token.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await expect.poll(() => requested).toMatchObject({ start: 4, end: 6 });
+});

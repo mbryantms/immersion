@@ -58,7 +58,8 @@ function lcsOps(aText: string, bText: string): Op[] {
 
 /** Runs of del/ins collapse into one miss (expected + what was typed);
  *  leading/trailing pure insertions render as struck-through extras. */
-export function scoreAttempt(expectedZh: string, typed: string): DictationResult {
+export function scoreAttempt(expectedZh: string, typed: string, variants: Record<string, string> = {}): DictationResult {
+  typed = [...typed].map((ch) => variants[ch] ?? ch).join("");
   const expected = normZh(expectedZh);
   const typedN = normZh(typed);
   const ops = lcsOps(expected, typedN);

@@ -55,4 +55,35 @@ def upgrade_db():
     here = Path(__file__).resolve()
     cfg = Config(str(here.parents[2] / "alembic.ini"))
     cfg.set_main_option("script_location", str(here.parent / "migrations"))
+    # Backup only when an existing database needs a schema change. Verify a
+    # restore before allowing Alembic to touch personal learning history.
+    from alembic.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    target = ScriptDirectory.from_config(cfg).get_current_head()
+    if settings.db_path.exists():
+        with make_engine().connect() as connection:
+            current = MigrationContext.configure(connection).get_current_revision()
+        if current != target:
+            from datetime import datetime, timezone
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+            verified_backup(settings.db_path, settings.data_dir / "backups" / f"pre-{target}-{stamp}.db")
     command.upgrade(cfg, "head")
+
+
+def verified_backup(path, destination):
+    """Online SQLite backup, then restore into memory and verify integrity.
+
+    SQLite's backup API includes committed WAL content. Never copy the raw DB.
+    """
+    import sqlite3
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as source, sqlite3.connect(destination) as backup:
+        source.backup(backup)
+        with sqlite3.connect(":memory:") as restored:
+            backup.backup(restored)
+            if restored.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("Database backup restore verification failed")
+            if restored.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise RuntimeError("Database backup contains foreign-key inconsistencies")
+    return destination

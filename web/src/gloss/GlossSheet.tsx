@@ -23,7 +23,7 @@ interface Props {
   savedLexemes: Set<number>;
   onClose: () => void;
   onResume: () => void;
-  onSaveWord: (lexemeId: number, surface: string, sentenceId: number) => void;
+  onSaveWord: (lexemeId: number, surface: string, sentenceId: number, selection?: { selected_reading?: string; selected_meaning?: string; occurrence_start?: number }) => void;
   onSaveSentence: (sentenceId: number) => void;
   onSetState: (lexemeId: number, state: KnowledgeStateName) => void;
 }
@@ -41,9 +41,9 @@ const NAME_NOTE: Record<string, string> = {
 function localInfo(word: Word, knowledge: Record<string, KnowledgeStateName>): LexemeInfo {
   return {
     lexeme_id: word.lex ?? -1,
-    simplified: word.t,
+    simplified: word.canonical ?? word.t,
     traditional: word.tr ?? null,
-    pinyin: null,
+    pinyin: word.reading ?? null,
     hsk: null,
     is_dict: !!word.gloss,
     pos: word.ne ? NE_POS[word.ne] : null,
@@ -84,6 +84,7 @@ export default function GlossSheet({
   const initial = target.candidates ?? (target.word ? [localInfo(target.word, knowledge)] : []);
   const [candidates, setCandidates] = useState<LexemeInfo[]>(initial);
   const [pick, setPick] = useState(0);
+  const [sensePick, setSensePick] = useState<number | null>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const returnFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const pinyinStyle = usePrefs((p) => p.pinyinStyle);
@@ -96,6 +97,7 @@ export default function GlossSheet({
   useEffect(() => {
     setCandidates(initial);
     setPick(0);
+    setSensePick(null);
     const lex = target.candidates ? null : target.word?.lex;
     if (lex) {
       track("lookup", { item_id: itemId, sentence_id: target.sentence.id, lexeme_id: lex });
@@ -110,6 +112,7 @@ export default function GlossSheet({
   if (!c) return null;
   const state = (c.lexeme_id > 0 && knowledge[c.lexeme_id]) || c.state;
   const saved = c.lexeme_id > 0 && savedLexemes.has(c.lexeme_id);
+  const choices = c.senses.flatMap((sense) => sense.defs.map((meaning) => ({ py: sense.py, meaning })));
 
   return (
     <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -195,7 +198,7 @@ export default function GlossSheet({
               {candidates.map((candidate, i) => (
                 <button
                   key={`${candidate.lexeme_id}-${i}`}
-                  onClick={() => setPick(i)}
+                  onClick={() => { setPick(i); setSensePick(null); }}
                   className={`shrink-0 rounded-lg border px-2.5 py-1 font-zh text-sm transition ${i === pick ? "border-teal-400/25 bg-teal-400/10 text-teal-100" : "border-white/7 bg-white/[0.025] text-stone-400 hover:bg-white/6 hover:text-stone-100"}`}
                 >
                   {candidate.simplified}
@@ -213,15 +216,18 @@ export default function GlossSheet({
         </div>
 
         <div className="transcript-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          <p className="mb-3 text-xs text-stone-400">Choose the dictionary entry you intend to learn. Automatic readings are estimates; dictionary tones may differ from connected speech.</p>
+          {target.word?.reading && <p className="mb-3 text-sm text-teal-200">In this sentence ({target.word.reading_source === "user" ? "selected" : "automatic"}): {formatPinyin(target.word.reading, pinyinStyle)}</p>}
           <div className="space-y-2.5">
-            {c.senses.slice(0, 6).map((sense, i) => (
-              <div key={i} className="flex items-start gap-3">
+            {choices.map((sense, i) => (
+              <label key={i} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${sensePick === i ? "border-teal-400 bg-teal-400/10" : "border-white/10"}`}>
+                <input type="radio" name="saved-sense" aria-label={`Learn meaning ${i + 1}: ${sense.meaning}`} checked={sensePick === i} onChange={() => setSensePick(i)} className="mt-1 accent-teal-400" />
                 <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-white/5 text-[10px] tabular-nums text-stone-400">{i + 1}</span>
                 <p className="min-w-0 text-[13px] leading-relaxed text-stone-200 sm:text-sm">
-                  {sense.py && sense.py !== c.pinyin && <span className="mr-2 font-medium text-teal-300/75">{formatPinyin(sense.py, pinyinStyle)}</span>}
-                  {sense.defs.join(" · ")}
+                  {sense.py && <span className="mr-2 font-medium text-teal-300/75">{formatPinyin(sense.py, pinyinStyle)}</span>}
+                  {sense.meaning}
                 </p>
-              </div>
+              </label>
             ))}
             {!c.senses.length && (!c.is_dict && c.pos && NAME_NOTE[c.pos] ? (
               <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center">
@@ -251,11 +257,18 @@ export default function GlossSheet({
           {c.lexeme_id > 0 && (
             <>
               <button
-                onClick={() => onSaveWord(c.lexeme_id, c.simplified, target.sentence.id)}
+                onClick={() => {
+                  const sense = sensePick === null ? null : choices[sensePick];
+                  onSaveWord(c.lexeme_id, target.word?.t ?? c.simplified, target.sentence.id, {
+                    selected_reading: sense?.py ?? undefined,
+                    selected_meaning: sense?.meaning,
+                    occurrence_start: target.word?.start,
+                  });
+                }}
                 className={`gloss-action-primary ${saved ? "is-saved" : ""}`}
               >
                 <BookmarkIcon filled={saved} />
-                {saved ? "Saved · add context" : "Save word"}
+                {sensePick !== null ? "Save selected meaning" : saved ? "Saved · add context" : "Save word"}
               </button>
               <button
                 onClick={() => onSetState(c.lexeme_id, state === "known" ? "new" : "known")}

@@ -65,31 +65,47 @@ def _fields(session: Session, item: SavedItem) -> tuple[dict, dict]:
 
     if item.kind == "word" and item.lexeme_id:
         lex = session.get(Lexeme, item.lexeme_id)
-        simplified = item.surface or lex.simplified
+        simplified = lex.simplified
         traditional = lex.traditional or ""
-        pinyin = _marks(simplified)
+        from pypinyin.contrib.tone_convert import to_tone
+        context_words = ((sentence.analysis if sentence else (snap or {}).get("analysis")) or {}).get("words", [])
+        occurrence_start = (snap or {}).get("occurrence_start")
+        contextual_reading = next((w.get("reading") for w in context_words
+                                   if w.get("lex") == item.lexeme_id and w.get("reading")
+                                   and (occurrence_start is None or w.get("start") == occurrence_start)), None)
+        reading = item.selected_reading or contextual_reading
+        pinyin = (" ".join(to_tone(s) for s in reading.split()) if reading else _marks(simplified))
         from ..lingua.cedict import load as load_cedict
 
         gl = load_cedict().gloss(simplified) or []
-        meaning = "; ".join(d for g in gl for d in g.get("defs", []))[:500]
+        meaning = item.selected_meaning or "; ".join(d for g in gl for d in g.get("defs", []))[:500]
     else:
         simplified = item.surface or zh
         traditional = ""
         pinyin = _marks(simplified)
         meaning = en
 
+    words = ((sentence.analysis if sentence else (snap or {}).get("analysis")) or {}).get("words", [])
+    sentence_pinyin = " ".join(" ".join(w.get("py", [w["t"]])) for w in words) if words else _marks(zh)
+    if item.selected_reading and words:
+        from pypinyin.contrib.tone_convert import to_tone
+        start = (snap or {}).get("occurrence_start")
+        sentence_pinyin = " ".join(
+            " ".join(to_tone(s) for s in item.selected_reading.split())
+            if w.get("lex") == item.lexeme_id and (start is None or w.get("start") == start)
+            else " ".join(w.get("py", [w["t"]])) for w in words)
     media_item = session.get(MediaItem, sentence.item_id) if sentence else None
     t0, t1 = effective_times(session, sentence) if sentence else (0, 0)
     return (
         {
-            "ID": _note_id(simplified),
+            "ID": (_note_id(simplified) + ("-s" + hashlib.sha256(f"{item.selected_reading}:{item.selected_meaning}".encode()).hexdigest()[:10] if item.selected_reading or item.selected_meaning else "")),
             "Simplified": simplified,
             "Traditional": traditional,
             "Pinyin": pinyin,
             "Meaning": meaning,
             "Sentence": zh,
             "SentenceTraditional": (sentence.trad if sentence else None) or "",
-            "SentencePinyin": _marks(zh),
+            "SentencePinyin": sentence_pinyin,
             "SentenceMeaning": en,
         },
         {
@@ -222,7 +238,7 @@ def export_items(session: Session, entries: list[dict], progress=lambda msg: Non
                     data = _frame(src, mid)
                     ac("storeMediaFile", filename=f"{stem}-frame.jpg", data=base64.b64encode(data).decode())
                     fields[image_field] = f'<img src="{stem}-frame.jpg">'
-            if item.kind == "word" and "Audio" in model_fields:
+            if item.kind == "word" and not item.selected_reading and "Audio" in model_fields:
                 try:
                     fields["Audio"] = _store(f"{stem}-word.mp3", _tts(fields.get("Simplified", "")))
                 except Exception:

@@ -152,6 +152,10 @@ function SavedRow({ item, checked, onCheck, onRemove }: { item: SavedItemOut; ch
                 {item.anki_note_id && <Badge className="bg-emerald-400/12 text-[10px] text-emerald-300">In Anki</Badge>}
                 {item.review && <Badge variant="secondary" className="text-[10px]">{item.review.graduated ? "Review complete" : `Review rung ${item.review.rung + 1}`}</Badge>}
               </div>
+              {(item.selected_reading || item.selected_meaning) && <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+                {item.selected_reading && <p className="text-primary">Selected reading: {item.selected_reading}</p>}
+                {item.selected_meaning && <p className="mt-1 text-foreground">{item.selected_meaning}</p>}
+              </div>}
               {!!item.contexts.length && (
                 <ul className="mt-2 space-y-2">
                   {item.contexts.map((context, index) => (
