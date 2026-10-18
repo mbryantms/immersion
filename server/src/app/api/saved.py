@@ -217,7 +217,7 @@ def list_saved(
         "items": [
             {
                 "id": i.id, "kind": i.kind, "lexeme_id": i.lexeme_id, "surface": i.surface,
-                "note": i.note, "tags": i.tags, "created_at": i.created_at,
+                "note": i.note, "tags": i.tags, "created_at": i.created_at, "archived": i.archived,
                 "selected_reading": i.selected_reading, "selected_meaning": i.selected_meaning,
                 "selection_source": i.selection_source,
                 "contexts": ctxs.get(i.id, []),
@@ -249,8 +249,10 @@ def patch_saved(item_id: int, body: SavedPatch, session: Session = Depends(get_s
         item.note = body.note
     if body.tags is not None:
         item.tags = body.tags
-    if body.archived is not None:
+    if body.archived is not None and body.archived != item.archived:
         item.archived = body.archived
+        session.add(Event(type="saved_suspended" if body.archived else "saved_resumed",
+                          lexeme_id=item.lexeme_id, data={"saved_item_id": item.id}))
     session.commit()
     return {"ok": True}
 

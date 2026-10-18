@@ -395,5 +395,36 @@ class LearningEvidence(Base):
     method: Mapped[str] = mapped_column(String)
     assistance: Mapped[str] = mapped_column(String)
     score: Mapped[float] = mapped_column(Float)
+    valid_for_summary: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     scope: Mapped[dict] = mapped_column(JSON)
     __table_args__ = (Index("ix_evidence_lexeme_ts", "lexeme_id", "ts"),)
+
+
+class GuidedScene(Base):
+    """A source snapshot and resumable, revision-protected learning cycle."""
+    __tablename__ = "guided_scene"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_uuid: Mapped[str] = mapped_column(String, unique=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))
+    goal: Mapped[str] = mapped_column(String)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    stage: Mapped[str] = mapped_column(String, default="watch")
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    support: Mapped[dict] = mapped_column(JSON, default=dict)
+    revisits: Mapped[int] = mapped_column(Integer, default=0)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_guided_scene_due", "due_at"),)
+
+
+class SceneQuestion(Base):
+    """An explicitly reviewed local answer key; reporting suspends future use."""
+    __tablename__ = "scene_question"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scene_id: Mapped[int] = mapped_column(ForeignKey("guided_scene.id"))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String, default="active")
+    body: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_scene_question_scene", "scene_id"),)

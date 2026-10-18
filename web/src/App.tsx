@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils";
 import { updateHaltSupport } from "./lib/haltSupport";
 import { ZH_FONTS, usePrefs } from "./lib/prefs";
 
+const ScenePage = lazy(() => import("./pages/ScenePage"));
+const PracticePage = lazy(() => import("./pages/PracticePage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const JobsPage = lazy(() => import("./pages/JobsPage"));
 const LibraryPage = lazy(() => import("./pages/LibraryPage"));
@@ -39,7 +41,7 @@ interface NavItem {
 
 const primaryNav: NavItem[] = [
   { to: "/", label: "Home", icon: Home },
-  { to: "/library", label: "Library", icon: BookOpen, matches: ["/series/", "/watch/"] },
+  { to: "/library", label: "Library", icon: BookOpen, matches: ["/series/", "/watch/", "/scenes/", "/practice"] },
   { to: "/review", label: "Review", icon: ChartNoAxesColumnIncreasing },
   { to: "/saved", label: "Saved", icon: Bookmark },
   { to: "/search", label: "Search", icon: Search, matches: ["/word/"] },
@@ -101,6 +103,8 @@ export default function App() {
         <Suspense fallback={<LoadingPage />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/practice" element={<PracticePage />} />
+            <Route path="/scenes/:id" element={<ScenePage />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/series/:id" element={<SeriesPage />} />
             <Route path="/watch/:id" element={<WatchPage />} />

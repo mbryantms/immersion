@@ -61,6 +61,7 @@ test("gloss traps focus, closes with Escape, and restores the selected word", as
   await word.click();
   const dialog = page.getByRole("dialog", { name: "Definition for 学习" });
   await expect(dialog).toBeVisible();
+  await dialog.evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))); });
   const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(accessibility.violations.map((item) => ({ id: item.id, targets: item.nodes.map((node) => node.target) }))).toEqual([]);
   for (let i = 0; i < 14; i++) await page.keyboard.press("Tab");

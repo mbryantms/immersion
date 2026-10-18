@@ -374,8 +374,8 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
 
 .gloss-popover { animation: gloss-popover-in 180ms cubic-bezier(.2, .8, .2, 1); transform-origin: bottom center; }
 @keyframes gloss-popover-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { transform: translateY(12px) scale(0.985); }
+  to { transform: translateY(0) scale(1); }
 }
 
 .episode-nav {

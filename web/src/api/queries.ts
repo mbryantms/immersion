@@ -102,14 +102,15 @@ export function useSaveItem(itemId: number) {
       qc.invalidateQueries({ queryKey: ["sentences", itemId] });
       qc.invalidateQueries({ queryKey: ["knowledge", itemId] });
       qc.invalidateQueries({ queryKey: ["saved"] });
+      qc.invalidateQueries({ queryKey: ["mining-budget"] });
     },
   });
 }
 
-export const useSaved = (kind?: string) =>
+export const useSaved = (kind?: string, archived = false) =>
   useQuery({
-    queryKey: ["saved", kind ?? "all"],
-    queryFn: () => get<{ items: SavedItemOut[] }>(`/saved-items${kind ? `?kind=${kind}` : ""}`),
+    queryKey: ["saved", kind ?? "all", archived],
+    queryFn: () => get<{ items: SavedItemOut[] }>(`/saved-items?archived=${archived}${kind ? `&kind=${kind}` : ""}`),
   });
 
 export function useUnsave() {
@@ -145,7 +146,9 @@ export function usePatchSaved() {
   return useMutation({
     mutationFn: ({ id, ...body }: { id: number; note?: string; archived?: boolean }) =>
       patch(`/saved-items/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved"] }),
+    onSuccess: () => {
+      for (const key of [["saved"], ["review-queue"], ["dashboard"], ["knowledge"]]) void qc.invalidateQueries({ queryKey: key });
+    },
   });
 }
 

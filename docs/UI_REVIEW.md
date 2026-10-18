@@ -96,3 +96,18 @@ The existing React 19/Tailwind/Radix/TanStack stack was retained. Browser inspec
 - [Selected reading/meaning evidence on mobile](screenshots/word-evidence-mobile.png)
 
 Combined validation: **165 backend tests, 26 frontend unit tests, and 37 Chromium checks pass**, with TypeScript/Vite build and core Python correctness/whitespace checks. A synthetic local service benchmark over 250 items / 40,000 sentences / 320,000 token occurrences returned recommendations in median 164 ms and dashboard aggregation in 74 ms. This is not end-to-end latency or representative-hardware certification. [Migration, evidence policy, recommendation formulas, and remaining learning/validation gates](LEARNER_EVIDENCE.md) are documented separately. Manual screen-reader, Safari/iPad, zoom, real-library CPU/GPU work, live Anki and Caddy runtime checks remain open.
+
+
+## Guided scenes, constructions and selective mining follow-up
+
+Watch can start a short Read/Listen scene. The new lazy-loaded scene route has a semantic step list/progress, source-bound media controls, keyboard-focus heading updates, named hint/replay actions, explicit reflection versus local-key feedback, stale-source handling, and revision-safe retry/reload. The source/answer editor appears only in supported study steps. `/practice` offers resumable/due scenes, labelled construction navigation, contrast examples, candidate-library links, interpretation feedback, report/suspend/restore, and version conflicts. Home exposes the scene inbox.
+
+Mining starts with a few candidates and an explicit reading/meaning choice; over-budget saves require a deliberate local UI choice. The session summary no longer preselects all unknowns or closes before requests succeed. Failed choices remain retryable and confirmed saves are retained. Settings distinguishes display-default reset from learner/intake preferences. Saved has Active/Suspended views with named, reversible actions and focus moved to the destination filter. Context and review rung remain visible after resume.
+
+The existing dictionary popup had a transient contrast failure during its opacity fade. The fade was removed while retaining movement and reduced-motion support; its accessibility test waits for animation completion before scanning. An actual video replay/seek check verifies that scene bounds do not create a same-position seek loop.
+
+- [Guided listening with the transcript hidden](screenshots/guided-listening-mobile.png)
+- [Scene meaning check and suspension recovery](screenshots/scene-meaning-mobile.png)
+- [Mandarin construction practice and explanations](screenshots/construction-practice-mobile.png)
+
+Validation passes **188 backend tests, 26 frontend unit tests and 45 Chromium checks**, with production build and changed application Python/new-test correctness/whitespace checks. The expanded scenes/meaning/construction and populated Saved views have passing WCAG-tagged axe scans and mobile overflow checks at 320/390px. Screenshots were visually inspected. Browser APIs/media are synthetic fixtures; separate backend tests exercise real SQLite/API behavior. Independent teacher/learner review of exercise language, manual screen-reader/zoom/Safari/iPad, real media/hardware/large-library work, live Anki and Caddy runtime checks remain open. See [guided learning details and limits](GUIDED_LEARNING.md).

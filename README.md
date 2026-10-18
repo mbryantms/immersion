@@ -1,9 +1,9 @@
 # Immersion (沉浸)
 
-Self-hosted Mandarin immersion app: local video (and, in Phase 2, podcasts) with
-interactive multi-track subtitles wired to a persistent learner model and an
-Anki bridge. Successor to the static-site podcast reader; plan and rationale in
-`~/.claude/plans/review-the-doc-in-splendid-steele.md`.
+Local Mandarin reading and listening practice with videos and podcasts,
+interactive subtitles, contextual dictionary/vocabulary tools, guided scenes,
+construction exercises, learner evidence, and an Anki bridge. The roadmap below
+tracks delivered features and remaining learning-quality work.
 
 ## Layout
 
@@ -24,7 +24,7 @@ and verification limits.
   transcript panel, sentence stepping/loop/pause-after, per-sentence EN and
   pinyin reveal, traditional toggle, gloss sheet with save/known/ignore.
 - `data/` — CC-CEDICT and HSK 3.0 word list, imported into the DB at first boot.
-- `deploy/` — Caddyfile (SPA + `/media/*` file_server + `/api` proxy on :8736)
+- `deploy/` — Caddyfile (SPA + dynamic `/media` and `/api` proxy on :8736)
   and systemd user units.
 
 ## Run (dev)
@@ -71,3 +71,5 @@ A save sentence · M pause-after-sentence · [ ] speed · Esc close
 Source selection, correction history, playback repair, and migration details: [source reliability delivery](docs/SOURCE_RELIABILITY.md).
 
 Learner evidence, optional preferences, recommendation estimates, and migration policy: [learner evidence delivery](docs/LEARNER_EVIDENCE.md).
+
+Guided scenes, offline Mandarin construction practice, selective mining and suspension: [guided learning delivery](docs/GUIDED_LEARNING.md).

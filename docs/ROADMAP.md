@@ -2,7 +2,7 @@
 
 Immersion should help a learner understand authentic Mandarin, recognise it again in unfamiliar contexts, and retain useful vocabulary. This roadmap turns the application audit into a dependency-ordered delivery plan for a single local installation. Learning correctness, usable study flows, and recovery of personal learning data take precedence over adding more features.
 
-Baseline: `bb338a3181e0f339ba797be963644800a701ec1d`. Updated 18 October 2026. Work on this branch includes trustworthy practice, Mandarin representations, source recovery/corrections, and the learner-evidence delivery; this document is not a claim that every milestone is complete.
+Baseline: `bb338a3181e0f339ba797be963644800a701ec1d`. Updated 18 October 2026. Work on this branch includes trustworthy practice, Mandarin representations, source recovery/corrections, learner evidence, and guided scenes/construction practice; this document is not a claim that every milestone is complete.
 
 ## Delivery decisions
 
@@ -94,10 +94,10 @@ Migration strategy: add nullable canonical/occurrence/sense fields; backfill in 
 
 | ID | Issue and implementation | Status | Acceptance criteria |
 | --- | --- | --- | --- |
-| G01 | Build an optional short-scene learning cycle | Planned | Watch → clarify a few useful expressions → reduce support → answer a meaning question → revisit later; free viewing stays available |
-| G02 | Add meaning-focused Mandarin comprehension tasks | Planned | Test agent/patient, negation, aspect, result, comparison, and paraphrase; plausible distractors have explanatory answers; ambiguous questions can be reported and suspended |
-| G03 | Teach reusable constructions | Planned | 的/地/得, 了/过/着, 把/被, complements, measure words, topic-comment, comparisons, separable verbs, and paired patterns link to contrasting library examples |
-| G04 | Make vocabulary mining selective | Planned | Daily intake budget, usefulness/repetition signals, and easy suspension keep review manageable; saved count is not treated as success |
+| G01 | Build an optional short-scene learning cycle | Delivered | Source-snapshotted Read/Listen scenes resume across reloads; supported study → reduced support → local keyed check or labelled reflection → due revisit; revisions/retries/source changes are guarded and free viewing remains available |
+| G02 | Add meaning-focused Mandarin comprehension tasks | Partial | Versioned bundled contrasts cover roles, negation, aspect, result, comparison and paraphrase; local scene questions require explicit review and explain distractors. Reports suspend grading and exclude prior questionable results while retaining audit. Independent linguistic validation and automatic grounded scene questions remain open |
+| G03 | Teach reusable constructions | Partial | Twelve offline construction lessons provide explanations, contrasting examples and candidate simplified/traditional library links. Candidate markers are not validated grammar parses; richer paired patterns and validated contrasting library examples remain open |
+| G04 | Make vocabulary mining selective | Delivered | Optional daily intake suggestion, scene repetition candidates, deliberate definition saves and over-budget choices, no bulk preselection, confirmed/failed-save recovery, and reversible Active/Suspended views preserve progress without treating saved counts as success |
 | G05 | Add recording/shadowing and careful pronunciation feedback | Planned | Source/repeated learner audio can be compared; recognition confidence is not presented as pronunciation accuracy; tone claims require a validated assessment method |
 | G06 | Expose source and timing provenance | Partial | Official/sidecar/ASR/corrected text, source/generated translation, engine, and timing reliability are distinguishable; low-quality material is excluded from high-stakes grading |
 | G07 | Repair alignment confidence semantics | Partial | Timestamp overlap is labelled temporal coverage; overlapping intervals use union coverage; mismatches and interpolated timings are flagged; semantic correctness is assessed separately |
@@ -117,7 +117,7 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 | U05 | Profile real local workloads | Planned | Measure small/large libraries, long transcripts, CPU transcription, playback while importing, and memory/VRAM; publish baseline hardware and p50/p95 measurements |
 | U06 | Optimise queue, library, and alignment queries | Planned | Due filtering/limits execute in SQL; batch related rows; avoid ORDER BY random on large sets; cache measured costly coverage aggregates; sweep sorted subtitle intervals |
 | U07 | Prioritise interactive work without resource contention | Partial | Long transcription/transcode cannot starve quick dictionary/review/export work; bounded workers or cooperative stages respect CPU/GPU budgets; ffmpeg has timeouts/cancellation |
-| U08 | Automate interaction and accessibility regression checks | Partial | 33 Playwright checks cover real React routes with synthetic media, including nine page axe scans and the gloss dialog; full build passes. Add CI and manual screen-reader/Safari checks |
+| U08 | Automate interaction and accessibility regression checks | Partial | 45 Playwright checks cover production React routes with synthetic media, including guided scenes, question/contrast feedback, selective mining, reversible suspension, nine baseline page axe scans and expanded-surface scans; full build passes. Add CI and manual screen-reader/Safari checks |
 
 ## M7 Retention and outcomes
 
@@ -127,7 +127,7 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 | A02 | Make Anki schema/deck/field mappings configurable | Planned | Preflight identifies missing note type/fields/Anki; configuration is validated and saved; duplicate handling is explicit; default personal note type is optional |
 | A03 | Reconcile Anki evidence over time | Planned | Deleted/lapsed/suspended/nonmatching cards update derived evidence appropriately; reading-card maturity is not treated as listening mastery; manual precedence remains explainable |
 | A04 | Keep graduates awaiting export visible | Partial | Dashboard excludes archived/already-linked graduates. Add a persistent export inbox, explicit deferred/exported choices, and recovery after an interrupted export |
-| O01 | Separate activity from learning outcomes | Partial | Home labels media-duration activity honestly. Store actual active time/rate, first attempts, hints/replays, delayed success, skill, and unseen-context transfer |
+| O01 | Separate activity from learning outcomes | Partial | Home labels media-duration activity honestly. Guided checks retain explicit hints/replays, skill and delayed status; bundled practice distinguishes first/repeat attempts and reported-question grades are excluded from averages. Actual active time/rate and unseen-context transfer remain open |
 | O02 | Add periodic unfamiliar-material benchmarks | Planned | Short comparable reading/listening samples provide interpretable trends; avoid coaching on benchmark material; report difficulty and uncertainty |
 | O03 | Validate usefulness with learners | Planned | Beginner/intermediate and both-script learners complete key tasks; observe lookup disruption, support dependence, review load, and delayed transfer; revise based on failures |
 
@@ -158,7 +158,7 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 1. **Canonical forms and selected readings follow-up:** reconcile legacy duplicate lexeme IDs without conflating learning evidence; improve automatic polyphone/particle disambiguation and correct spans that change segmentation. The first implementation of L01–L04 and P02 is delivered; see [Mandarin phase delivery](MANDARIN_REPRESENTATION.md).
 2. **Media recovery follow-up:** complete D08–D09 and D11/D13, including artwork/ASR caches, explicit Mandarin audio-track selection, ambiguous-pair diagnostics, and full personal-data export/restore. The correction/identity/source-selection delivery is described in [source reliability](SOURCE_RELIABILITY.md).
 3. **Learner evidence follow-up:** complete K01/K04 calibration, finer hint tracking, and source-quality validation. The first K01–K06 delivery preserves original events, manual choices and Anki intervals; see [learner evidence](LEARNER_EVIDENCE.md).
-4. **Guided scenes and grammar:** G01–G05, validated question generation, and hint-aware outcomes.
+4. **Guided learning follow-up:** validate bundled language/difficulty, strengthen grounded scene questions and grammar matches, add G05 recording/shadowing, and complete G08–G09 AI validation/prioritization. The first G01–G04 delivery is described in [guided learning](GUIDED_LEARNING.md).
 5. **Daily-use polish and retention:** remaining U items, A01–A04, O01–O03, and measured performance improvements.
 
 ## Canonical forms and selected readings delivery
@@ -179,3 +179,10 @@ D08 remains partial for artwork and ASR-cache recovery; D09 for explicit audio-t
 [Implementation, migration, UI and performance evidence](LEARNER_EVIDENCE.md) describes this delivery. Passive encounters are deduplicated per word/source/UTC day, never create Known, and survive offline/retry delivery without inflating evidence. Lookups no longer erase familiarity. Review graduation retains scoped self-report evidence rather than promoting whole-word knowledge; transcription remains separate. The migration audits legacy derived Known → Familiar while preserving original events, manual marks, Anki intervals, and graduated queues.
 
 Optional learning preferences, beginner-safe word eligibility, indexed/encountered filters, Word/Home evidence summaries, visible recommendation reasons, subtitle pace/source warnings, and per-skill sample ratings are implemented. K01/K04 remain partial for calibrated confidence, finer assistance, validated source quality, and cross-content sample calibration. Pronunciation/production are explicitly unassessed. Combined checks: 165 backend, 26 frontend unit, 37 Chromium; synthetic local recommendation median 164 ms over 320,000 token occurrences. No production database or deployment was changed.
+
+
+## Guided learning and selective mining delivery
+
+[Implementation, migration, learning limits and verification](GUIDED_LEARNING.md) describes optional source-snapshotted scenes with supported study, selective clarification, reduced support, reviewed local checks/self-reflection, and due revisits. Twelve versioned offline construction lessons cover core Mandarin meaning contrasts and link to candidate library examples. Question reports preserve audit while excluding earlier keyed results from averages. Intake suggestions, explicit contextual saves, partial-failure recovery and reversible card suspension reduce collection pressure without claiming saved cards are learned.
+
+G01/G04 are delivered. G02/G03 remain partial for independently validated language/difficulty, automatic grounded scene questions and validated grammar/contrast matching. G05 and G09 remain planned; G06–G08 retain their named follow-ups. Combined verification is 188 backend, 26 frontend unit and 45 Chromium checks plus build/lint/whitespace checks. New screenshots were inspected; production data/deployment were not changed.

@@ -1,5 +1,5 @@
-import { ArchiveX, ArrowUpRight, Check, ExternalLink, PackageOpen, RotateCcw, Send, Tags } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArchiveX, Pause, Play, ArrowUpRight, Check, ExternalLink, PackageOpen, RotateCcw, Send, Tags } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { FilterGroup, FilterOption } from "@/components/ui/filter-group";
-import { setKnowledge, useResetSavedReview, useResetSentencePlayed, useSaved, useUnsave } from "../api/queries";
+import { setKnowledge, usePatchSaved, useResetSavedReview, useResetSentencePlayed, useSaved, useUnsave } from "../api/queries";
 import type { SavedItemOut } from "../api/types";
 import ExportTray from "../saved/ExportTray";
 
@@ -19,8 +19,12 @@ type Kind = "all" | "word" | "sentence";
 
 export default function SavedPage() {
   const queryClient = useQueryClient();
+  const [suspended, setSuspended] = useState(false);
+  const activeFilter = useRef<HTMLButtonElement | null>(null);
+  const suspendedFilter = useRef<HTMLButtonElement | null>(null);
+  const suspension = usePatchSaved();
   const [kind, setKind] = useState<Kind>("all");
-  const { data, isLoading } = useSaved(kind === "all" ? undefined : kind);
+  const { data, isLoading } = useSaved(kind === "all" ? undefined : kind, suspended);
   const unsave = useUnsave();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [trayIds, setTrayIds] = useState<number[] | null>(null);
@@ -64,10 +68,13 @@ export default function SavedPage() {
       <PageHeader
         eyebrow="Learning queue"
         title="Saved words and sentences"
-        description="Keep useful context close, review it briefly, then graduate durable knowledge to Anki."
+        description="Keep useful context close, review it briefly, then prepare selected cards for Anki."
         actions={<Button asChild variant="outline"><Link to="/review"><ArrowUpRight />Start review</Link></Button>}
       />
 
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Learning queue status"><Button ref={activeFilter} className="min-h-11" variant={suspended ? "outline" : "default"} aria-pressed={!suspended} onClick={() => { setSuspended(false); setSelected(new Set()); }}>Active cards</Button><Button ref={suspendedFilter} className="min-h-11" variant={suspended ? "default" : "outline"} aria-pressed={suspended} onClick={() => { setSuspended(true); setSelected(new Set()); }}>Suspended cards</Button></div>
+      <p className="text-xs leading-relaxed text-muted-foreground">Suspension hides a card from local review while retaining its contexts, reading/meaning, and review progress. Due dates remain unchanged. Linked Anki cards are managed separately in Anki.</p>
+      {suspension.isError && <p role="alert" className="text-sm text-destructive">Could not change suspension. The card is retained; try its action again.</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <FilterGroup type="single" aria-label="Filter saved items by type" value={kind} onValueChange={(value) => { if (value) setKind(value as Kind); setSelected(new Set()); }}>
           <FilterOption value="all">All</FilterOption><FilterOption value="word">Words</FilterOption><FilterOption value="sentence">Sentences</FilterOption>
@@ -83,15 +90,15 @@ export default function SavedPage() {
             <Button size="sm" variant="ghost" disabled={!hasSelectedWords} onClick={() => void bulkKnowledge("known")}><Check />Mark known</Button>
             <Button size="sm" variant="ghost" disabled={!hasSelectedWords} onClick={() => void bulkKnowledge("ignored")}><Tags />Ignore</Button>
             <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void bulkRemove()}><ArchiveX />Remove</Button>
-            <Button size="sm" onClick={() => setTrayIds([...selected])}><Send />Export to Anki</Button>
+            <Button size="sm" disabled={suspended} onClick={() => setTrayIds([...selected])}><Send />Export to Anki</Button>
           </CardContent>
         </Card>
       )}
 
       {isLoading ? <div className="space-y-2">{[1, 2, 3].map((item) => <div key={item} className="h-28 animate-pulse rounded-2xl bg-muted/50" />)}</div> : !items.length ? (
-        <EmptyState title="Nothing saved here yet" description="Tap a word or save a sentence while watching. It will appear here with its original context." action={{ label: "Browse the library", href: "/library" }} icon={<PackageOpen className="size-5" />} />
+        <EmptyState title={suspended ? "No suspended cards" : "Nothing saved here yet"} description={suspended ? "Suspended cards keep their context and progress here until you resume them." : "Tap a word or save a sentence while watching. It will appear here with its original context."} action={{ label: "Browse the library", href: "/library" }} icon={<PackageOpen className="size-5" />} />
       ) : (
-        <ul className="space-y-2">{items.map((item) => <SavedRow key={item.id} item={item} checked={selected.has(item.id)} onCheck={(checked) => toggle(item.id, checked)} onRemove={() => unsave.mutate(item.id)} />)}</ul>
+        <ul className="space-y-2">{items.map((item) => <SavedRow key={item.id} item={item} checked={selected.has(item.id)} onCheck={(checked) => toggle(item.id, checked)} onRemove={() => unsave.mutate(item.id)} suspended={suspended} suspensionPending={suspension.isPending} onToggleSuspend={() => suspension.mutate({ id: item.id, archived: !suspended }, { onSuccess: () => { setSelected((previous) => new Set([...previous].filter((id) => id !== item.id))); toast.success(suspended ? "Card resumed" : "Card suspended"); (suspended ? activeFilter : suspendedFilter).current?.focus(); } })} />)}</ul>
       )}
 
       {trayIds && <ExportTray savedItemIds={trayIds} onClose={() => setTrayIds(null)} />}
@@ -99,7 +106,7 @@ export default function SavedPage() {
   );
 }
 
-function SavedRow({ item, checked, onCheck, onRemove }: { item: SavedItemOut; checked: boolean; onCheck: (on: boolean) => void; onRemove: () => void }) {
+function SavedRow({ item, checked, onCheck, onRemove, suspended, suspensionPending, onToggleSuspend }: { item: SavedItemOut; checked: boolean; onCheck: (on: boolean) => void; onRemove: () => void; suspended: boolean; suspensionPending: boolean; onToggleSuspend: () => void }) {
   const title = item.surface || item.contexts[0]?.zh || "Saved sentence";
   const resetReview = useResetSavedReview();
   const resetSentencePlayed = useResetSentencePlayed();
@@ -185,6 +192,7 @@ function SavedRow({ item, checked, onCheck, onRemove }: { item: SavedItemOut; ch
                   </DialogContent>
                 </Dialog>
               )}
+              <Button variant="ghost" size="icon-sm" className="min-h-11 min-w-11 text-muted-foreground" disabled={suspensionPending} onClick={onToggleSuspend} aria-label={`${suspended ? "Resume" : "Suspend"} ${title}`}>{suspended ? <Play /> : <Pause />}</Button>
               <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" onClick={onRemove} aria-label={`Remove ${title}`}><ArchiveX /></Button>
             </div>
           </div>

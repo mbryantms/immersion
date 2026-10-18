@@ -178,6 +178,7 @@ export interface LookupResult {
 }
 
 export interface SavedItemOut {
+  archived?: boolean;
   id: number;
   kind: "word" | "sentence";
   lexeme_id: number | null;
@@ -271,6 +272,7 @@ export interface WeekStat {
 }
 
 export interface DashboardStats {
+  excluded_question_results?: number;
   practice_evidence?: { task: string; method: string; assistance: string; attempts: number; mean_score: number }[];
   weeks: WeekStat[];
   totals: { lookups: number; sentences_played: number; saves: number };
@@ -337,4 +339,49 @@ export interface JobOut {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface GuidedQuestion {
+  id: number;
+  revision: number;
+  category: string;
+  prompt: string;
+  passage: string;
+  choices: string[];
+  provenance: string;
+  externally_validated: boolean;
+}
+export interface MeaningFeedback {
+  correct: boolean;
+  answer: number;
+  choice: number;
+  explanations: string[];
+  provenance?: string;
+}
+export interface GuidedScene {
+  id: number;
+  item_id: number;
+  goal: "read" | "listen";
+  stage: "watch" | "clarify" | "reduce" | "check" | "complete";
+  revision: number;
+  snapshot: { title: string; fingerprint: string | null; kind: string; t0: number; t1: number; lines: { id: number; zh: string; en: string | null; translation_source: string | null; t0: number; t1: number; revision: number; words: Word[] }[] };
+  support: Record<string, unknown> & { checked?: boolean; reflection?: boolean; answer_feedback?: MeaningFeedback };
+  revisits: number;
+  due_at: string | null;
+  completed_at: string | null;
+  source_current: boolean;
+  stream_url: string | null;
+  question: GuidedQuestion | null;
+}
+export interface SceneSummary {
+  id: number; item_id: number; title: string; goal: string; stage: string;
+  revision: number; due_at: string | null; due: boolean; duration_ms: number;
+}
+export interface MiningBudget {
+  daily_word_budget: number; used: number; remaining: number; timezone: string; soft_limit: boolean;
+}
+export interface Construction {
+  id: string; title: string; note: string; suspended: boolean;
+  examples: { zh: string; en: string }[];
+  question: { category: string; prompt: string; passage: string; choices: string[] };
 }

@@ -1,3 +1,4 @@
+import { useMiningBudget } from "../components/MiningBudgetCard";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { KnowledgeStateName } from "../api/types";
 
 export interface SessionLookup {
   lexemeId: number;
@@ -22,22 +22,21 @@ export interface SessionLookup {
 interface Props {
   lookups: SessionLookup[];
   minutes: number;
-  knowledge: Record<string, KnowledgeStateName>;
   savedLexemes: Set<number>;
-  onSave: (selected: SessionLookup[]) => void;
+  onSave: (selected: SessionLookup[]) => Promise<void>;
   onClose: () => void;
 }
 
 /** End-of-session recap: what you looked up, with one-tap bulk save into the
  *  review funnel. No quiz, no streaks — just capture before it evaporates. */
-export default function SessionSummary({ lookups, minutes, knowledge, savedLexemes, onSave, onClose }: Props) {
-  // preselect words still unknown and not already saved
-  const [selected, setSelected] = useState<Set<number>>(() => new Set(
-    lookups
-      .filter((l) => !savedLexemes.has(l.lexemeId))
-      .filter((l) => ["new", "learning"].includes(knowledge[l.lexemeId] ?? "new"))
-      .map((l) => l.lexemeId),
-  ));
+export default function SessionSummary({ lookups, minutes, savedLexemes, onSave, onClose }: Props) {
+  const budget = useMiningBudget();
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [override, setOverride] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
+  const selectedWords = lookups.filter((word) => selected.has(word.lexemeId) && !savedLexemes.has(word.lexemeId));
+  const overBudget = budget.data ? selectedWords.length > budget.data.remaining : false;
 
   const toggle = (lexemeId: number) => {
     setSelected((prev) => {
@@ -50,17 +49,18 @@ export default function SessionSummary({ lookups, minutes, knowledge, savedLexem
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+      <DialogContent aria-busy={saving} className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Session summary</DialogTitle>
           <DialogDescription>
-            {minutes >= 1 ? `${Math.round(minutes)} min of listening` : "A quick session"}
+            {minutes >= 1 ? `${Math.round(minutes)} min of media activity` : "A quick session"}
             {lookups.length
               ? ` · ${lookups.length} word${lookups.length === 1 ? "" : "s"} looked up`
-              : " · no lookups — smooth sailing"}
+              : " · no dictionary lookups recorded"}
           </DialogDescription>
         </DialogHeader>
 
+        <p className="text-xs leading-relaxed text-muted-foreground">Choose a few expressions you expect to reuse. Saving every unfamiliar word can overload review; a saved count is not a learning outcome.{budget.data ? ` ${budget.data.remaining} new cards remain within today's suggestion.` : ""}</p>
         {lookups.length > 0 && (
           <div className="space-y-1">
             {lookups.map((lookup) => {
@@ -72,7 +72,7 @@ export default function SessionSummary({ lookups, minutes, knowledge, savedLexem
                 >
                   <Checkbox
                     checked={selected.has(lookup.lexemeId)}
-                    disabled={alreadySaved}
+                    disabled={alreadySaved || saving}
                     onCheckedChange={() => toggle(lookup.lexemeId)}
                   />
                   <span className="font-zh text-base text-stone-100">{lookup.surface}</span>
@@ -84,11 +84,13 @@ export default function SessionSummary({ lookups, minutes, knowledge, savedLexem
           </div>
         )}
 
+        {overBudget && <label className="flex min-h-11 items-center gap-3 text-xs"><input type="checkbox" checked={override} onChange={(event) => setOverride(event.target.checked)} />Save these choices beyond today's suggestion</label>}
+        {error && <p role="alert" className="text-sm text-destructive">Some words could not be saved. Confirmed saves are retained; retry the remaining choices.</p>}
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Close</Button>
-          {selected.size > 0 && (
-            <Button onClick={() => onSave(lookups.filter((l) => selected.has(l.lexemeId)))}>
-              Save {selected.size} word{selected.size === 1 ? "" : "s"}
+          {(selectedWords.length > 0 || saving) && (
+            <Button disabled={saving || (overBudget && !override)} onClick={async () => { if (saving) return; setSaving(true); setError(false); try { await onSave(selectedWords); } catch { setError(true); } finally { setSaving(false); } }}>
+              {saving ? "Saving…" : `Save ${selectedWords.length} word${selectedWords.length === 1 ? "" : "s"}`}
             </Button>
           )}
         </DialogFooter>

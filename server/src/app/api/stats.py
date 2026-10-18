@@ -114,11 +114,13 @@ def dashboard(population: str = Query(default="library", pattern="^(library|enco
     last_export = session.get(Setting, "anki_last_export")
 
     return {
+        "excluded_question_results": session.scalar(select(func.count()).select_from(LearningEvidence).where(
+            LearningEvidence.ts >= since, LearningEvidence.valid_for_summary.is_(False))) or 0,
         "practice_evidence": [{"task": task, "method": method, "assistance": assistance,
                                "attempts": attempts, "mean_score": round(mean, 3)}
             for task, method, assistance, attempts, mean in session.execute(select(
                 LearningEvidence.task, LearningEvidence.method, LearningEvidence.assistance,
-                func.count(), func.avg(LearningEvidence.score)).where(LearningEvidence.ts >= since)
+                func.count(), func.avg(LearningEvidence.score)).where(LearningEvidence.ts >= since, LearningEvidence.valid_for_summary.is_(True))
                 .group_by(LearningEvidence.task, LearningEvidence.method, LearningEvidence.assistance))],
         "population": population,
         "weeks": week_stats,

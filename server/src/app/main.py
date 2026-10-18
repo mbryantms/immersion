@@ -24,6 +24,7 @@ from .api import (
     search,
     sentences,
     stats,
+    scenes,
 )
 
 
@@ -44,7 +45,7 @@ app.add_middleware(
 )
 
 for module in (corrections, library, sentences, knowledge, saved, progress, events, jobs, app_settings, anki,
-               review, search, stats):
+               review, search, stats, scenes):
     app.include_router(module.router, prefix="/api")
 app.include_router(media.router)  # /media/* — Caddy owns this path in prod
 

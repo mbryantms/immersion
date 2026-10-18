@@ -1,3 +1,4 @@
+import SceneInbox from "../components/SceneInbox";
 import LearnerProfileCard from "../components/LearnerProfileCard";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, BookOpen, BookmarkPlus, Brain, Clock3, Headphones, Layers3, Search, Sparkles, Target } from "lucide-react";
@@ -100,6 +101,8 @@ export default function HomePage() {
         </Card>
       </section>
 
+      <SceneInbox compact />
+
       {!!recs?.items.length && (
         <section>
           <SectionHeader
@@ -145,7 +148,8 @@ export default function HomePage() {
         <CardHeader><CardTitle className="text-base">Practice evidence</CardTitle><CardDescription>Last 8 weeks · task-specific results, with no combined mastery score</CardDescription></CardHeader>
         <CardContent className="space-y-3">
           {!stats?.practice_evidence?.length && <p className="text-sm text-muted-foreground">Review and dictation results will appear here. Playing media alone records exposure.</p>}
-          <div className="grid gap-3 sm:grid-cols-2">{stats?.practice_evidence?.map((evidence) => <div key={`${evidence.task}:${evidence.method}:${evidence.assistance}`} className="rounded-lg border border-border p-3 text-sm"><p className="font-medium capitalize">{evidence.task.replaceAll("_", " ")}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{evidence.attempts} attempts · {evidence.method === "self_report" ? "self-graded recall" : "automatic character matching"} · assistance: {evidence.assistance.replaceAll("_", " ")}</p><p className="mt-2 text-xs">{Math.round(evidence.mean_score*100)}% average {evidence.method === "self_report" ? "reported recall" : "transcription accuracy"}</p></div>)}</div>
+          <div className="grid gap-3 sm:grid-cols-2">{stats?.practice_evidence?.map((evidence) => <div key={`${evidence.task}:${evidence.method}:${evidence.assistance}`} className="rounded-lg border border-border p-3 text-sm"><p className="font-medium capitalize">{evidence.task.replaceAll("_", " ")}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{evidence.attempts} attempts · {evidence.method === "self_report" ? "self-reported result" : evidence.method === "automatic_edit_distance" ? "automatic character matching" : evidence.method === "curated_answer_key" ? "curated example key · practice" : "local learner-authored key · unvalidated"} · assistance: {evidence.assistance.replaceAll("_", " ")}</p><p className="mt-2 text-xs">{Math.round(evidence.mean_score*100)}% average {evidence.method === "self_report" ? evidence.task === "scene_meaning_reflection" ? "self-reported understanding" : "reported recall" : evidence.method === "automatic_edit_distance" ? "transcription accuracy" : "answer-key agreement"}</p></div>)}</div>
+          {!!stats?.excluded_question_results && <p className="text-xs leading-relaxed text-amber-200">{stats.excluded_question_results} reported-question results are excluded from these averages. Original attempts remain in the audit history.</p>}
           <p className="text-xs leading-relaxed text-muted-foreground">These results reflect practised material. Listening comprehension, pronunciation and spontaneous production require separate assessment. Lookups can signal curiosity or a new meaning.</p>
         </CardContent>
       </Card>

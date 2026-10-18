@@ -1,3 +1,4 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import DifficultyFeedback from "../player/DifficultyFeedback";
 import CorrectionEditor from "../player/CorrectionEditor";
 import SourcePanel from "../player/SourcePanel";
@@ -25,7 +26,7 @@ import {
 } from "../api/queries";
 import type { LookupResult, SentenceOut, Word } from "../api/types";
 import GlossSheet, { type GlossTarget } from "../gloss/GlossSheet";
-import { flush, track } from "../lib/events";
+import { flush, track, uuid } from "../lib/events";
 import { cycleSubtitleMode, usePrefs } from "../lib/prefs";
 import AudioSurface from "../player/AudioSurface";
 import Controls, { nextRate } from "../player/Controls";
@@ -45,6 +46,7 @@ export default function WatchPage() {
 }
 
 function WatchSession() {
+  const queryClient = useQueryClient();
   const id = Number(useParams().id);
   const navigate = useNavigate();
   const videoRef = useRef<MediaEl | null>(null);
@@ -99,6 +101,16 @@ function WatchSession() {
     itemId: id,
   });
   const current = idx >= 0 ? sentences[idx] : null;
+  const sceneRequest = useRef(uuid());
+  const sceneStart = useRef<{ sentence_id: number; goal: "read" | "listen" } | null>(null);
+  const createScene = useMutation({
+    mutationFn: () => {
+      sceneStart.current ??= { sentence_id: current?.id ?? sentences[0].id, goal: studyMode === "read" ? "read" : "listen" };
+      return post<{ id: number }>(`/items/${id}/scenes`, { ...sceneStart.current, request_uuid: sceneRequest.current, seconds: 60 });
+    },
+    onSuccess: (scene) => { videoRef.current?.pause(); navigate(`/scenes/${scene.id}`); },
+    onError: () => toast.error("Could not create this scene. Check the source and try again; your request is retained."),
+  });
 
   const setKnowledge = useSetKnowledge(id);
   const saveItem = useSaveItem(id);
@@ -522,6 +534,7 @@ function WatchSession() {
 
         <SourcePanel item={item} />
         <StudyModeSelector value={studyMode} onChange={changeStudyMode} />
+        <Button className="mb-2 min-h-11 w-fit" variant="outline" disabled={!sentences.length || !item.ready || createScene.isPending} onClick={() => createScene.mutate()}>{createScene.isPending ? "Preparing scene…" : "Study a short scene"}</Button>
         <DifficultyFeedback itemId={id} goal={studyMode} position={() => Math.round((videoRef.current?.currentTime ?? 0) * 1000)} />
 
         {sentencesError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm"><p className="grow">The transcript could not be loaded. Your media can still play.</p><Button variant="outline" size="sm" onClick={() => void refetchSentences()}>Retry transcript</Button></div>}
@@ -781,19 +794,20 @@ function WatchSession() {
         <SessionSummary
           lookups={[...sessionLookups.current.values()]}
           minutes={playedSeconds.current / 60}
-          knowledge={knowledge}
           savedLexemes={savedLexemes}
-          onSave={(selected) => {
-            selected.forEach((lookup) =>
-              saveItem.mutate({
-                kind: "word",
-                lexeme_id: lookup.lexemeId,
-                surface: lookup.surface,
-                sentence_id: lookup.sentenceId,
-              }),
-            );
-            selected.forEach((lookup) => track("save", { item_id: id, sentence_id: lookup.sentenceId, lexeme_id: lookup.lexemeId }));
-            toast.success(`Saved ${selected.length} word${selected.length === 1 ? "" : "s"} to your review queue`);
+          onSave={async (selected) => {
+            let failed = 0;
+            let confirmed = 0;
+            for (const lookup of selected) {
+              try {
+                await saveItem.mutateAsync({ kind: "word", lexeme_id: lookup.lexemeId, surface: lookup.surface, sentence_id: lookup.sentenceId });
+                confirmed++;
+                track("save", { item_id: id, sentence_id: lookup.sentenceId, lexeme_id: lookup.lexemeId });
+              } catch { failed++; }
+            }
+            await queryClient.invalidateQueries({ queryKey: ["knowledge", id] });
+            if (confirmed) toast.success(`Saved ${confirmed} word${confirmed === 1 ? "" : "s"} to your review queue`);
+            if (failed) throw new Error("Some saves could not be confirmed");
             setSummaryOpen(false);
           }}
           onClose={() => setSummaryOpen(false)}
