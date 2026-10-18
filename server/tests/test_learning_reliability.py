@@ -86,7 +86,9 @@ def test_spaced_ladder_requires_initial_practice_then_three_delayed_successes(se
             assert result["graduated"] == (index == 3)
         now += timedelta(days=days)
     with factory() as session:
-        assert session.get(KnowledgeState, ids["lexeme"]).state == "known"
+        assert session.get(KnowledgeState, ids["lexeme"]) is None
+        from app.models import LearningEvidence
+        assert session.query(LearningEvidence).count() == 4
         with pytest.raises(HTTPException):
             review_outcome(ids["saved"], OutcomeIn(result="fail"), session)
 

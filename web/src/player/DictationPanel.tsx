@@ -145,7 +145,7 @@ export default function DictationPanel({
       const result = scoreAttempt(s.zh, a.typed, scriptPolicy === "equivalent" ? s.script_variants : {});
       track("review_outcome", {
         item_id: itemId, sentence_id: s.id, study_mode: "dictation",
-        data: { score: Math.round(result.score * 100), script_policy: scriptPolicy, task: "transcription", source_revision: s.provenance?.revision ?? 0, expected_zh: s.zh },
+        data: { score: Math.round(result.score * 100), script_policy: scriptPolicy, task: "transcription", assistance: "unknown", source_revision: s.provenance?.revision ?? 0, expected_zh: s.zh },
       });
       setAttempts((prev) => ({ ...prev, [ordinalKey]: { ...a, checked: true, scriptPolicy, expected: s.zh, sourceRevision: s.provenance?.revision ?? 0, variants: s.script_variants } }));
     },

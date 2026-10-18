@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,8 @@ from ..models import (
     Event,
     KnowledgeState,
     Lexeme,
+    LexemeExposure,
+    LearningEvidence,
     MediaItem,
     ReviewState,
     SavedItem,
@@ -29,24 +31,28 @@ WEEKS = 8
 
 
 @router.get("/stats/dashboard")
-def dashboard(session: Session = Depends(get_session)):
+def dashboard(population: str = Query(default="library", pattern="^(library|encountered)$"),
+              session: Session = Depends(get_session)):
     now = datetime.now(timezone.utc)
     since = now - timedelta(weeks=WEEKS)
 
     # input minutes: sum of sentence durations actually played, per ISO week + kind
     rows = session.execute(
-        select(Event.ts, Sentence.t0_ms, Sentence.t1_ms, MediaItem.kind)
-        .join(Sentence, Sentence.id == Event.sentence_id)
-        .join(MediaItem, MediaItem.id == Sentence.item_id)
+        select(Event.ts, Event.data, Sentence.t0_ms, Sentence.t1_ms, MediaItem.kind)
+        .join(Sentence, Sentence.id == Event.sentence_id, isouter=True)
+        .join(MediaItem, MediaItem.id == Event.item_id, isouter=True)
         .where(Event.type == "sentence_played", Event.ts >= since)
     ).all()
     weekly: dict[str, dict[str, float]] = {}
-    for ts, t0, t1, kind in rows:
+    for ts, data, t0, t1, kind in rows:
         ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
         iso = ts.isocalendar()
         week = f"{iso.year}-W{iso.week:02d}"
         bucket = weekly.setdefault(week, {"video": 0.0, "audio": 0.0})
-        bucket["audio" if kind == "audio" else "video"] += (t1 - t0) / 60000
+        duration = (data or {}).get("duration_ms")
+        if not isinstance(duration, (int, float)):
+            duration = max(0, t1-t0) if t0 is not None and t1 is not None else 0
+        bucket["audio" if (data or {}).get("item_kind", kind) == "audio" else "video"] += max(0, duration)/60000
 
     # lookup rate + caption dependence per week (per 100 sentences played)
     counts = dict(session.execute(
@@ -87,15 +93,8 @@ def dashboard(session: Session = Depends(get_session)):
         .join(KnowledgeState, KnowledgeState.lexeme_id == Lexeme.id, isouter=True)
         .where(func.coalesce(KnowledgeState.state, "new").in_(("new", "learning")))
         .where(Lexeme.is_dict.is_(True))
-        # HSK 1–2 "unknowns" are almost always cold-start noise (的/我/了…),
-        # not real gaps at the levels this library targets. Words absent from
-        # the HSK lists slip that filter when they're common compounds
-        # (一个/这个) — require them to also be outside the top of the
-        # frequency lexicon before calling them noteworthy gaps.
-        .where(
-            (Lexeme.hsk_level >= 3)
-            | (Lexeme.hsk_level.is_(None) & (func.coalesce(Lexeme.freq_rank, 10**9) > 1500))
-        )
+        .where(True if population == "library" else Lexeme.id.in_(
+            select(LexemeExposure.lexeme_id).distinct()))
         .group_by(Lexeme.id)
         .order_by(func.count(func.distinct(TokenOccurrence.item_id)).desc(),
                   func.count(TokenOccurrence.lexeme_id).desc())
@@ -115,6 +114,13 @@ def dashboard(session: Session = Depends(get_session)):
     last_export = session.get(Setting, "anki_last_export")
 
     return {
+        "practice_evidence": [{"task": task, "method": method, "assistance": assistance,
+                               "attempts": attempts, "mean_score": round(mean, 3)}
+            for task, method, assistance, attempts, mean in session.execute(select(
+                LearningEvidence.task, LearningEvidence.method, LearningEvidence.assistance,
+                func.count(), func.avg(LearningEvidence.score)).where(LearningEvidence.ts >= since)
+                .group_by(LearningEvidence.task, LearningEvidence.method, LearningEvidence.assistance))],
+        "population": population,
         "weeks": week_stats,
         "totals": {
             "lookups": counts.get("lookup", 0),

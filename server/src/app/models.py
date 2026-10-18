@@ -207,7 +207,7 @@ class KnowledgeState(Base):
     __tablename__ = "knowledge_state"
     lexeme_id: Mapped[int] = mapped_column(ForeignKey("lexeme.id"), primary_key=True)
     state: Mapped[str] = mapped_column(String)  # new|learning|familiar|known|ignored
-    # familiar = derived from passive exposure (derive.py); any lookup demotes
+    # familiar = exposure estimate; retrieval evidence remains task-specific
     source: Mapped[str] = mapped_column(String)  # manual|anki|derived — manual > anki > derived
     anki_interval_days: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -290,7 +290,8 @@ class Event(Base):
     study_mode: Mapped[str | None] = mapped_column(String)
     data: Mapped[dict | None] = mapped_column(JSON)
     client_uuid: Mapped[str | None] = mapped_column(String, unique=True)  # idempotent batch replay
-    __table_args__ = (Index("ix_event_ts", "ts"), Index("ix_event_lexeme", "lexeme_id"))
+    __table_args__ = (Index("ix_event_ts", "ts"), Index("ix_event_lexeme", "lexeme_id"),
+                     Index("ix_event_type_study_ts", "type", "study_mode", "ts"))
 
 
 class PlaybackProgress(Base):
@@ -367,3 +368,32 @@ class Setting(Base):
     __tablename__ = "setting"
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON)
+
+
+class LexemeExposure(Base):
+    """One independent exposure per lexeme/source/UTC day; loops remain events."""
+    __tablename__ = "lexeme_exposure"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lexeme_id: Mapped[int] = mapped_column(ForeignKey("lexeme.id"))
+    item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))
+    day: Mapped[str] = mapped_column(String)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    task: Mapped[str] = mapped_column(String)
+    event_id: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (UniqueConstraint("lexeme_id", "item_id", "day"),
+                     Index("ix_exposure_lexeme", "lexeme_id"))
+
+
+class LearningEvidence(Base):
+    """Observed performance, never a claim of whole-word mastery."""
+    __tablename__ = "learning_evidence"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(Integer, unique=True)
+    lexeme_id: Mapped[int | None] = mapped_column(ForeignKey("lexeme.id"))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    task: Mapped[str] = mapped_column(String)
+    method: Mapped[str] = mapped_column(String)
+    assistance: Mapped[str] = mapped_column(String)
+    score: Mapped[float] = mapped_column(Float)
+    scope: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = (Index("ix_evidence_lexeme_ts", "lexeme_id", "ts"),)

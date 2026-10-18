@@ -81,13 +81,13 @@ def test_word_and_review_reset_flow(tmp_path):
             EventIn(client_uuid="play-two", type="sentence_played", item_id=item_id, sentence_id=sentence_id),
         ], session)
         stats = session.get(LexemeStats, lexeme_id)
-        assert (stats.encounters, stats.distinct_items) == (2, 1)
+        assert (stats.encounters, stats.distinct_items) == (1, 1)
         assert reset_sentence_played(sentence_id, session)["played"] is False
         latest = session.query(Event).order_by(Event.id.desc()).first()
         assert (latest.type, latest.sentence_id) == ("sentence_play_reset", sentence_id)
         # Marking a sentence unplayed is presentation state, not a rewrite of
         # word exposure or prior sentence-play events.
-        assert session.get(LexemeStats, lexeme_id).encounters == 2
+        assert session.get(LexemeStats, lexeme_id).encounters == 1
 
         review_outcome(saved_id, OutcomeIn(result="pass"), session)
         assert session.get(ReviewState, saved_id) is not None

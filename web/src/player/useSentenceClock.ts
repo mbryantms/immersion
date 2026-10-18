@@ -13,6 +13,7 @@ export interface ClockOpts {
   loop: boolean;
   interactionHold: boolean;
   subtitleMode: string;
+  studyMode?: string;
   itemId: number;
 }
 
@@ -133,6 +134,8 @@ export function useSentenceClock(
         track("sentence_played", {
           item_id: optsRef.current.itemId,
           sentence_id: sentence.id,
+          study_mode: optsRef.current.studyMode,
+          data: { source_revision: sentence.provenance?.revision ?? 0, duration_ms: sentence.t1 - sentence.t0 },
           subtitle_mode: optsRef.current.subtitleMode,
           position_ms: Math.round(positionMs),
         });

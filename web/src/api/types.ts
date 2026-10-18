@@ -142,8 +142,7 @@ export interface ItemDetail {
   unknown_lexemes?: number;
 }
 
-// familiar = derived automatically from repeated passive exposure without
-// lookups; renders like known, demoted to learning by any lookup
+// Familiarity is an exposure estimate. Lookups do not imply failure.
 export type KnowledgeStateName = "new" | "learning" | "familiar" | "known" | "ignored";
 
 export interface KnowledgeMap {
@@ -164,6 +163,12 @@ export interface LexemeInfo {
   state: KnowledgeStateName;
   state_source: string | null;
   saved_item_id: number | null;
+  evidence?: {
+    exposure: { independent_encounters: number; items: number; days: number; policy: string };
+    recent_retrieval: { task: string; method: string; assistance: string; score: number; ts: string; scope: { reading?: string | null; meaning?: string | null; delayed?: boolean } }[];
+    unassessed: string[];
+    limitation: string;
+  };
   stats?: { encounters: number; lookups: number; distinct_items: number; first_seen: string | null; last_seen: string | null };
 }
 
@@ -233,6 +238,7 @@ export interface ReviewContext {
   t1_ms: number;
   words: Word[];
   script_variants?: Record<string, string>;
+  source_revision?: number;
 }
 
 export interface ReviewItem {
@@ -265,6 +271,7 @@ export interface WeekStat {
 }
 
 export interface DashboardStats {
+  practice_evidence?: { task: string; method: string; assistance: string; attempts: number; mean_score: number }[];
   weeks: WeekStat[];
   totals: { lookups: number; sentences_played: number; saves: number };
   recurring_unknowns: {
@@ -279,6 +286,13 @@ export interface DashboardStats {
   anki: { last_import: unknown; last_export: unknown };
 }
 
+export interface LearnerProfile {
+  goal: "read" | "listen" | "dictate";
+  level: "unknown" | "beginner" | "intermediate" | "advanced";
+  script: "source" | "simplified" | "traditional";
+  interests: string[];
+}
+
 export interface Recommendation {
   item_id: number;
   title: string;
@@ -290,6 +304,14 @@ export interface Recommendation {
   thumb_url: string;
   coverage: number;
   unknown_lexemes: number;
+  unknowns_per_minute?: number;
+  dense_unknowns_30s?: number;
+  subtitle_characters_per_minute?: number;
+  subtitle_source?: string;
+  source_warning?: boolean;
+  goal?: string;
+  reasons?: string[];
+  uncertainty?: string;
 }
 
 export interface SearchResult {

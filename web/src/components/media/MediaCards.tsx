@@ -73,7 +73,7 @@ export function EpisodeCard({ episode, index }: { episode: EpisodeSummary; index
           {!episode.ready && <span className="flex items-center gap-1 text-amber-300/80">{episode.has_zh ? "Processing" : <><CaptionsOff className="size-3" />No subtitles</>}</span>}
           {episode.coverage !== undefined && <span className="ml-auto text-primary/80">{Math.round(episode.coverage * 100)}% vocabulary familiarity</span>}
         </div>
-        {episode.unknown_lexemes !== undefined && <p className="mt-1 text-[10px] text-muted-foreground">{episode.unknown_lexemes} words not yet known</p>}
+        {episode.unknown_lexemes !== undefined && <p className="mt-1 text-[10px] text-muted-foreground">{episode.unknown_lexemes} unmarked or learning word types</p>}
       </div>
     </>
   );

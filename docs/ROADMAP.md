@@ -2,7 +2,7 @@
 
 Immersion should help a learner understand authentic Mandarin, recognise it again in unfamiliar contexts, and retain useful vocabulary. This roadmap turns the application audit into a dependency-ordered delivery plan for a single local installation. Learning correctness, usable study flows, and recovery of personal learning data take precedence over adding more features.
 
-Baseline: `bb338a3181e0f339ba797be963644800a701ec1d`. Updated 18 October 2026. Work on this branch includes the initial delivery and the canonical-forms/selected-readings phase; this document is not a claim that every milestone is complete.
+Baseline: `bb338a3181e0f339ba797be963644800a701ec1d`. Updated 18 October 2026. Work on this branch includes trustworthy practice, Mandarin representations, source recovery/corrections, and the learner-evidence delivery; this document is not a claim that every milestone is complete.
 
 ## Delivery decisions
 
@@ -83,12 +83,12 @@ Migration strategy: add nullable canonical/occurrence/sense fields; backfill in 
 
 | ID | Issue and implementation | Status | Acceptance criteria |
 | --- | --- | --- | --- |
-| K01 | Separate reading, listening, pronunciation, meaning, and production evidence | Planned | Task, assistance, sense/reading, timestamp, and confidence are recorded independently; summary state is explainable |
-| K02 | Treat exposure as familiarity rather than mastery | Planned | Repetition without lookup does not create high-confidence comprehension; lookups can signal curiosity or a new sense; passive promotion is inspectable and reversible |
-| K03 | Use honest coverage language | Partial | Player/home describe estimated vocabulary familiarity. Audit every badge/card/nudge; explain ignored-word denominator and evidence sources; never label percentage as measured comprehension |
-| K04 | Recommend content using more than a fixed token threshold | Planned | Include unknowns/minute, difficult stretches, speech rate, topic interest, subtitle reliability, and skill; calibrate after a short sample and learner difficulty rating |
-| K05 | Remove beginner-hostile common-word assumptions | Planned | Optional onboarding establishes learner goals/script/level; HSK 1–2 and function words remain eligible gaps for beginners; common vocabulary is not presumed mastered |
-| K06 | Distinguish indexed corpus from actual encounters | Planned | Recurring unknowns and coverage explain their population; “in your library” and “you have encountered” are separate filters; repeated same-session loops are not independent mastery evidence |
+| K01 | Separate reading, listening, pronunciation, meaning, and production evidence | Partial | Scoped reading/listening/meaning review and sentence-transcription evidence retain timestamp, method, assistance and reading/meaning; Word/Home explain evidence. Pronunciation/production remain explicitly unassessed; calibrated confidence and finer assistance remain open |
+| K02 | Treat exposure as familiarity rather than mastery | Delivered | Source/day-deduplicated exposure can only infer Familiar; lookups do not demote; review graduation does not mark whole lexemes Known; exposure reset and audit preserve the distinction |
+| K03 | Use honest coverage language | Delivered | Player/library/home use vocabulary familiarity; recommendation explanations state uncertainty and ignored-word denominator; source pace and activity remain labelled estimates; retrieval has task-specific labels |
+| K04 | Recommend content using more than a fixed token threshold | Partial | Ranking includes unfamiliar occurrences/minute, dense cue-start windows, subtitle pace, source warnings, title interests, goal/level, and skill-specific episode ratings; fixed band no longer gates selection. Validated source quality and cross-content sample calibration remain open |
+| K05 | Remove beginner-hostile common-word assumptions | Delivered | Optional Home/Settings preferences establish goal/script/level/title interests without marking vocabulary known; common HSK/function words remain eligible gaps |
+| K06 | Distinguish indexed corpus from actual encounters | Delivered | Home has indexed/encountered filters and honest library counts; Word shows independent exposure and legacy-counter limits; loops are raw activity, not independent mastery evidence |
 
 ## M5 Guided learning and content quality
 
@@ -157,7 +157,7 @@ See [UI inspection and validation](UI_REVIEW.md) for the route-by-route review a
 
 1. **Canonical forms and selected readings follow-up:** reconcile legacy duplicate lexeme IDs without conflating learning evidence; improve automatic polyphone/particle disambiguation and correct spans that change segmentation. The first implementation of L01–L04 and P02 is delivered; see [Mandarin phase delivery](MANDARIN_REPRESENTATION.md).
 2. **Media recovery follow-up:** complete D08–D09 and D11/D13, including artwork/ASR caches, explicit Mandarin audio-track selection, ambiguous-pair diagnostics, and full personal-data export/restore. The correction/identity/source-selection delivery is described in [source reliability](SOURCE_RELIABILITY.md).
-3. **Evidence-based learner model:** K01–K06, with migration preserving original events and Anki evidence.
+3. **Learner evidence follow-up:** complete K01/K04 calibration, finer hint tracking, and source-quality validation. The first K01–K06 delivery preserves original events, manual choices and Anki intervals; see [learner evidence](LEARNER_EVIDENCE.md).
 4. **Guided scenes and grammar:** G01–G05, validated question generation, and hint-aware outcomes.
 5. **Daily-use polish and retention:** remaining U items, A01–A04, O01–O03, and measured performance improvements.
 
@@ -172,3 +172,10 @@ L01 remains partial because historical duplicate lexeme IDs are retained rather 
 [Implementation, migration, and validation](SOURCE_RELIABILITY.md) describes the next completed delivery. Local text/meaning/reading/timing corrections now have history, conflict protection, reset/restore, and an editor. Permanent sentence identities preserve matched contexts across reingestion and prevent SQLite ID reuse from reassigning old events. New checked dictation attempts retain their expected text and revision. Subtitle choices persist, unavailable tracks are deselected, and embedded caches include source fingerprints. Playback repair, cache revision URLs, conservative codec/container checks, dynamic-root serving, safer podcast pairing, timed SRT ingestion, union temporal coverage, and interpolation flags are implemented.
 
 D08 remains partial for artwork and ASR-cache recovery; D09 for explicit audio-track selection/browser capability testing; D11 for reviewable ambiguity diagnostics; D13 for a full export/restore flow including browser data. G06–G08 remain partial for provenance-aware task filtering, fuller alignment-quality presentation/validation, and strict AI schemas/correction handling. U07 has ffmpeg timeouts, but worker isolation, budgets, and cancellation remain outstanding. Legacy records cannot recover source revisions that were never recorded. No production database or local deployment was changed during this work.
+
+
+## Learner evidence and recommendation delivery
+
+[Implementation, migration, UI and performance evidence](LEARNER_EVIDENCE.md) describes this delivery. Passive encounters are deduplicated per word/source/UTC day, never create Known, and survive offline/retry delivery without inflating evidence. Lookups no longer erase familiarity. Review graduation retains scoped self-report evidence rather than promoting whole-word knowledge; transcription remains separate. The migration audits legacy derived Known → Familiar while preserving original events, manual marks, Anki intervals, and graduated queues.
+
+Optional learning preferences, beginner-safe word eligibility, indexed/encountered filters, Word/Home evidence summaries, visible recommendation reasons, subtitle pace/source warnings, and per-skill sample ratings are implemented. K01/K04 remain partial for calibrated confidence, finer assistance, validated source quality, and cross-content sample calibration. Pronunciation/production are explicitly unassessed. Combined checks: 165 backend, 26 frontend unit, 37 Chromium; synthetic local recommendation median 164 ms over 320,000 token occurrences. No production database or deployment was changed.

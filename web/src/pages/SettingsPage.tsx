@@ -1,3 +1,4 @@
+import LearnerProfileCard from "../components/LearnerProfileCard";
 import { BookOpenText, Captions, Cpu, Gauge, Palette, RotateCcw, Type } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -58,6 +59,7 @@ export default function SettingsPage() {
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="space-y-5">
+          <LearnerProfileCard />
           <Card>
             <CardHeader><div className="flex items-center gap-2"><Palette className="size-4 text-primary" /><CardTitle className="text-base">Reading and subtitles</CardTitle></div><CardDescription>Typography and annotation choices for Mandarin text</CardDescription></CardHeader>
             <CardContent className="space-y-0 pt-2">

@@ -326,7 +326,7 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
 .learning-toggle:disabled { opacity: 0.5; cursor: default; }
 
 /* Shared keyboard affordances also cover custom player controls. */
-:where(button, a, input, summary, [role="button"]):focus-visible {
+:where(button, a, input, select, textarea, summary, [role="button"]):focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 4px;
 }

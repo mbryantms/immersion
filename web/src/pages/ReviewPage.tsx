@@ -89,6 +89,9 @@ export default function ReviewPage() {
     try {
       const outcome = await postReviewOutcome(current.saved_item_id, {
         result, mode: listening ? "listen" : "context", request_uuid: requestId.current,
+        task: listening ? "listening_recall" : current.kind === "word" && context?.zh.includes(current.surface ?? "") ? "reading_recall" : "meaning_recall",
+        assistance: "none_reported", sentence_id: context?.sentence_id,
+        source_revision: context?.source_revision, context_zh: context?.zh,
       });
       if (outcome.graduated && !outcome.already_in_anki) {
         setGraduatedIds((previous) => [...new Set([...previous, current.saved_item_id])]);

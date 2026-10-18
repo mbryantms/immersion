@@ -4,6 +4,7 @@ interface LearnerEvent {
   client_uuid: string;
   type: string;
   session_id: string;
+  occurred_at?: string;
   item_id?: number;
   sentence_id?: number;
   lexeme_id?: number;
@@ -44,7 +45,7 @@ function schedule(delay: number) {
 }
 
 export function track(type: string, fields: Omit<LearnerEvent, "client_uuid" | "type" | "session_id"> = {}) {
-  const event = { client_uuid: uuid(), type, session_id: sessionId, ...fields };
+  const event = { client_uuid: uuid(), type, session_id: sessionId, occurred_at: new Date().toISOString(), ...fields };
   queue.push(event);
   try { localStorage.setItem(PREFIX + event.client_uuid, JSON.stringify(event)); } catch { /* memory fallback */ }
   schedule(10_000);

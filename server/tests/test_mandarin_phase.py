@@ -12,7 +12,6 @@ from app.lingua.diff import score_attempt
 from app.lingua.script_policy import script_variants
 from app.ingest.analysis import link_words, token_occurrences
 from app.models import SavedItem, Sentence, KnowledgeState
-from app.api.review import _mark_known_on_graduation
 from app.anki.export import _fields
 from app.db import verified_backup
 from test_api import client, db_session, seeded  # noqa: F401
@@ -91,7 +90,6 @@ def test_selected_senses_are_distinct_and_preserved(client, seeded, db_session):
     assert first["id"] == retry["id"] != second["id"]
     with db_session() as session:
         saved = session.get(SavedItem, first["id"])
-        _mark_known_on_graduation(session, saved)
         assert session.get(KnowledgeState, seeded["lexeme"]).state == "learning"
         fields, _ = _fields(session, saved)
         assert fields["Meaning"] == "hello"

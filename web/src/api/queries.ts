@@ -173,7 +173,7 @@ export const useReviewQueue = () =>
     refetchOnWindowFocus: false, // keep the active review session stable
   });
 
-export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string; request_uuid?: string }) =>
+export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string; request_uuid?: string; task?: string; assistance?: string; sentence_id?: number | null; source_revision?: number; context_zh?: string }) =>
   post<import("./types").ReviewOutcome>(`/review/${savedItemId}/outcome`, body);
 
 export const useRecommendations = () =>
@@ -183,10 +183,10 @@ export const useRecommendations = () =>
     staleTime: 5 * 60_000, // coverage moves slowly; don't recompute per visit
   });
 
-export const useDashboard = () =>
+export const useDashboard = (population: "library" | "encountered" = "library") =>
   useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => get<import("./types").DashboardStats>("/stats/dashboard"),
+    queryKey: ["dashboard", population],
+    queryFn: () => get<import("./types").DashboardStats>(`/stats/dashboard?population=${population}`),
   });
 
 export const useSearch = (q: string) =>

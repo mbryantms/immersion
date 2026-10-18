@@ -1,3 +1,4 @@
+import DifficultyFeedback from "../player/DifficultyFeedback";
 import CorrectionEditor from "../player/CorrectionEditor";
 import SourcePanel from "../player/SourcePanel";
 import { sourceSelection } from "../gloss/selection";
@@ -94,6 +95,7 @@ function WatchSession() {
     loop,
     interactionHold: !!gloss || !!correctionFor,
     subtitleMode: effectiveSubtitleMode,
+    studyMode,
     itemId: id,
   });
   const current = idx >= 0 ? sentences[idx] : null;
@@ -520,6 +522,7 @@ function WatchSession() {
 
         <SourcePanel item={item} />
         <StudyModeSelector value={studyMode} onChange={changeStudyMode} />
+        <DifficultyFeedback itemId={id} goal={studyMode} position={() => Math.round((videoRef.current?.currentTime ?? 0) * 1000)} />
 
         {sentencesError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm"><p className="grow">The transcript could not be loaded. Your media can still play.</p><Button variant="outline" size="sm" onClick={() => void refetchSentences()}>Retry transcript</Button></div>}
         {playbackError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm"><p className="grow">This media could not play. Check the source file or its conversion status in Admin.</p><Button variant="outline" size="sm" onClick={() => { setPlaybackError(false); videoRef.current?.load(); }}>Retry playback</Button><Button asChild variant="ghost" size="sm"><Link to="/admin">Open Admin</Link></Button></div>}

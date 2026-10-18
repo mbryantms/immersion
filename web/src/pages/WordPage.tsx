@@ -109,7 +109,7 @@ export default function WordPage() {
                 </div>
                 <div className="rounded-lg border border-destructive/20 p-3">
                   <div className="flex items-start justify-between gap-4">
-                    <div><p className="text-sm font-medium">Reset exposure history</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Set Seen and Looked up counters back to zero. The audit event is retained.</p></div>
+                    <div><p className="text-sm font-medium">Reset exposure history</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Clear exposure counters and estimated Familiar status. Retrieval results and audit events are retained.</p></div>
                     <Button variant="destructive" size="sm" disabled={updating || !lex.stats || (lex.stats.encounters === 0 && lex.stats.lookups === 0)} onClick={() => void resetExposure()}><Trash2 />Reset</Button>
                   </div>
                 </div>
@@ -127,22 +127,27 @@ export default function WordPage() {
             <CardContent className="space-y-3 pt-2">
               {lex.senses.map((sense, index) => <div key={index} className="flex items-start gap-3"><span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">{index + 1}</span><p className="text-sm leading-relaxed text-foreground/90">{sense.py && <span className="mr-2 font-medium text-primary/70">{formatPinyin(sense.py, pinyinStyle)}</span>}{sense.defs.join("; ")}</p></div>)}
               {!lex.senses.length && <p className="text-sm text-muted-foreground">No dictionary entry. This may be a name or out-of-vocabulary token.</p>}
-              {lex.stats && <><Separator /><div className="flex flex-wrap gap-4 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><Eye className="size-3.5" />Seen {lex.stats.encounters} times</span><span className="flex items-center gap-1.5"><BookMarked className="size-3.5" />Looked up {lex.stats.lookups} times</span></div></>}
-              {lex.state_source === "derived" && (lex.state === "familiar" || lex.state === "known") && lex.stats && (
-                <p className="mt-3 rounded-lg border border-teal-400/15 bg-teal-400/5 px-3 py-2 text-xs leading-relaxed text-teal-200/90">
-                  Marked <strong>{lex.state}</strong> automatically: seen {lex.stats.encounters} times
-                  across {lex.stats.distinct_items} {lex.stats.distinct_items === 1 ? "source" : "sources"}
-                  {lex.stats.lookups === 0 ? " and never looked up" : " with no recent lookups"}.
-                  Looking it up again moves it back to Learning.
-                </p>
-              )}
+              {lex.stats && <><Separator /><div className="flex flex-wrap gap-4 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><Eye className="size-3.5" />Exposure counter: {lex.stats.encounters}</span><span className="flex items-center gap-1.5"><BookMarked className="size-3.5" />Looked up {lex.stats.lookups} times</span></div></>}
+              {lex.state_source === "derived" && (lex.state === "familiar" || lex.state === "known") && <p className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed text-muted-foreground">Estimated familiarity from exposure. This does not establish meaning recall, listening comprehension, or pronunciation. Lookups remain useful and do not erase evidence.</p>}
+
             </CardContent>
           </Card>
+
+          {lex.evidence && <Card>
+            <CardHeader><CardTitle className="text-base">Evidence for this word</CardTitle><p className="text-xs leading-relaxed text-muted-foreground">{lex.evidence.limitation}</p></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg bg-muted/40 p-3"><p className="text-sm font-medium">{lex.evidence.exposure.independent_encounters} independent encounters · {lex.evidence.exposure.items} sources · {lex.evidence.exposure.days} days</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{lex.evidence.exposure.policy}. Recorded since the evidence update; older counters above may include repeated loops.</p></div>
+              <h2 className="text-sm font-medium">Recent retrieval results</h2>
+              {!lex.evidence.recent_retrieval.length && <p className="text-sm text-muted-foreground">No task-specific retrieval results recorded yet.</p>}
+              <ul className="space-y-3">{lex.evidence.recent_retrieval.map((evidence, index) => <li key={`${evidence.ts}:${index}`} className="rounded-lg border border-border p-3 text-xs leading-relaxed"><div className="flex flex-wrap justify-between gap-2"><span className="font-medium capitalize">{evidence.task.replaceAll("_", " ")}</span><time dateTime={evidence.ts}>{evidence.ts.slice(0, 10)}</time></div><p className="mt-1 text-muted-foreground">{evidence.score === 1 ? "Recalled" : "Practise again"} · self-graded · assistance: {evidence.assistance.replaceAll("_", " ")}{evidence.scope.delayed ? " · delayed review" : " · initial practice"}</p>{(evidence.scope.reading || evidence.scope.meaning) && <p className="mt-1">Selected scope: {evidence.scope.reading} {evidence.scope.meaning}</p>}</li>)}</ul>
+              <p className="text-xs text-muted-foreground">Pronunciation and spontaneous production have not been assessed. A result for one reading or meaning does not establish the others.</p>
+            </CardContent>
+          </Card>}
 
           {!!examples?.results.length && <section><SectionHeader title="Example sentences" description="Additional usage examples from Tatoeba" /><div className="space-y-2">{examples.results.map((example, index) => <Card key={index} className="bg-card/45"><CardContent className="py-3"><p className="font-zh text-base leading-relaxed">{example.zh}</p><p className="mt-1 text-xs text-muted-foreground">{example.en}</p></CardContent></Card>)}</div></section>}
 
           <section>
-            <SectionHeader title="In your library" description="Every indexed encounter, linked back to its source" />
+            <SectionHeader title="In your library" description="Indexed occurrences, whether or not you have played them" />
             <div className="space-y-2">
               {(concordance?.results ?? []).map((result) => <Card key={result.sentence_id} className="transition hover:border-primary/25"><CardContent className="py-3"><p className="font-zh text-base leading-relaxed">{result.zh}</p>{result.en && <p className="mt-1 text-xs text-muted-foreground">{result.en}</p>}<Button asChild variant="ghost" size="sm" className="mt-1 -ml-2 text-primary"><Link to={`/watch/${result.item_id}?t=${result.t0_ms}`}>{result.item_title ?? "Open source"} · {fmt(result.t0_ms)}<ArrowUpRight /></Link></Button></CardContent></Card>)}
               {concordance && !concordance.results.length && <Card className="border-dashed bg-card/30"><CardContent className="py-8 text-center text-sm text-muted-foreground"><LibraryBig className="mx-auto mb-2 size-5" />No indexed occurrences.</CardContent></Card>}

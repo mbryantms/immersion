@@ -26,7 +26,8 @@ export const test = base.extend({
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname.replace("/api", "");
       let payload: unknown = {};
-      if (path === "/library") payload = { roots: [], series: [series], continue: [] };
+      if (path === "/learner-profile") payload = { goal: "listen", level: "unknown", script: "source", interests: [] };
+      else if (path === "/library") payload = { roots: [], series: [series], continue: [] };
       else if (path === "/stats/dashboard") payload = { weeks: [], totals: { lookups: 1, sentences_played: 3, saves: 1 }, recurring_unknowns: [], review_due: 1, graduated_waiting: 0, anki: { last_import: null, last_export: null } };
       else if (path === "/recommendations") payload = { band: { low: 0.88, high: 0.985 }, fallback: false, items: [{ item_id: 1, title: item.title, kind: "video", series_id: 1, series_title: series.title, duration_ms: 4000, thumb_url: item.thumb_url, coverage: 0.92, unknown_lexemes: 2 }] };
       else if (/^\/items\/\d+\/sentences$/.test(path)) payload = { item_id: Number(path.split("/")[2]), zh_offset_ms: 0, sentences: [{ id: 1, ord: 0, zh, tr: "學習，再學習。", t0: 0, t1: 3500, en: context.en, conf: 1, words, script_variants: { "學": "学", "習": "习" } }] };

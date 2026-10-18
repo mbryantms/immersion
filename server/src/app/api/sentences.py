@@ -229,6 +229,8 @@ def get_lexeme(lexeme_id: int, session: Session = Depends(get_session)):
         raise HTTPException(404)
     stats = session.get(LexemeStats, lexeme_id)
     payload = _lexeme_payload(session, lex)
+    from ..evidence import lexeme_evidence
+    payload["evidence"] = lexeme_evidence(session, lexeme_id)
     payload["stats"] = {
         "encounters": stats.encounters if stats else 0,
         "lookups": stats.lookups if stats else 0,

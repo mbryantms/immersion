@@ -28,6 +28,7 @@ from ..models import (
     TokenOccurrence,
     Lexeme,
     Sense,
+    SentenceIdentity,
 )
 from ..timing import effective_times
 
@@ -39,21 +40,6 @@ SESSION_CAP = 20
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _mark_known_on_graduation(session: Session, item: SavedItem) -> None:
-    """Graduating the funnel is retrieval evidence — reflect it in the
-    knowledge model (never overriding manual or Anki evidence)."""
-    from ..models import KnowledgeState
-
-    if not item.lexeme_id or item.selected_reading or item.selected_meaning:
-        return  # One selected sense does not establish every meaning/reading.
-    ks = session.get(KnowledgeState, item.lexeme_id)
-    if ks is None:
-        session.add(KnowledgeState(lexeme_id=item.lexeme_id, state="known",
-                                   source="derived", updated_at=_now()))
-    elif ks.source == "derived":
-        ks.state, ks.updated_at = "known", _now()
 
 
 def _fresh_context(session: Session, item: SavedItem) -> Sentence | None:
@@ -79,6 +65,7 @@ def _sentence_payload(session: Session, s: Sentence) -> dict:
     item = session.get(MediaItem, s.item_id)
     root = session.get(MediaRoot, item.root_id) if item else None
     t0, t1 = effective_times(session, s)
+    identity = session.get(SentenceIdentity, s.id)
     return {
         "sentence_id": s.id,
         "item_id": s.item_id,
@@ -90,6 +77,7 @@ def _sentence_payload(session: Session, s: Sentence) -> dict:
         "t0_ms": t0,
         "t1_ms": t1,
         "words": (s.analysis or {}).get("words", []),
+        "source_revision": identity.revision if identity else 0,
     }
 
 
@@ -161,6 +149,11 @@ class OutcomeIn(BaseModel):
     result: str  # 'pass' | 'fail'
     mode: str | None = None
     request_uuid: str | None = Field(default=None, max_length=64)
+    task: str | None = None
+    assistance: str = "unknown"
+    sentence_id: int | None = None
+    source_revision: int | None = None
+    context_zh: str | None = Field(default=None, max_length=20000)
 
 
 @router.post("/review/{saved_item_id}/outcome")
@@ -201,7 +194,6 @@ def review_outcome(saved_item_id: int, body: OutcomeIn, session: Session = Depen
         if rs.streak > len(LADDER_DAYS):
             # Initial practice followed by successful 1d, 3d, and 7d reviews.
             rs.graduated = True
-            _mark_known_on_graduation(session, item)
         else:
             rs.rung = min(rs.streak - 1, len(LADDER_DAYS) - 1)
     else:
@@ -223,11 +215,26 @@ def review_outcome(saved_item_id: int, body: OutcomeIn, session: Session = Depen
         "suggest_drop": suggest_drop,
         "next_due_days": LADDER_DAYS[min(rs.rung, len(LADDER_DAYS) - 1)],
     }
-    session.add(Event(
+    event = Event(
         type="review_outcome", lexeme_id=item.lexeme_id, study_mode=body.mode or "review",
         client_uuid=event_uuid,
         data={"saved_item_id": saved_item_id, "result": body.result,
-              "rung": rs.rung, "outcome": outcome},
-    ))
+              "rung": rs.rung, "outcome": outcome,
+              "reading": item.selected_reading, "meaning": item.selected_meaning,
+              "task": body.task, "assistance": body.assistance},
+    )
+    session.add(event)
+    session.flush()
+    from ..models import LearningEvidence
+    task = body.task if body.task in ("reading_recall", "listening_recall", "meaning_recall") else "unspecified_recall"
+    session.add(LearningEvidence(event_id=event.id, lexeme_id=item.lexeme_id,
+        ts=now, task=task, method="self_report",
+        assistance=body.assistance if body.assistance in ("none_reported", "hinted") else "unknown",
+        score=1.0 if body.result == "pass" else 0.0,
+        scope={"saved_item_id": item.id, "reading": item.selected_reading,
+               "meaning": item.selected_meaning, "sentence_id": body.sentence_id,
+               "source_revision": body.source_revision, "context_zh": body.context_zh,
+               "delayed": rs.passes+rs.fails > 1,
+               "limitation": "Self-graded; does not establish whole-word mastery"}))
     session.commit()
     return outcome

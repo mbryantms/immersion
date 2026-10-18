@@ -68,7 +68,7 @@ npm run test:ui
 
 From `server/`, run `uv run pytest` with Python 3.12 and the development dependencies installed. The browser tests intercept API calls, so they exercise production UI behaviour deterministically; the backend suite separately exercises the actual SQLite/API logic. The included tiny MP4 is a generated colour-and-tone fixture with no personal or third-party media.
 
-No database schema migration is introduced in this delivery. Existing graduated items are preserved; the revised due/spacing policy applies to subsequent submissions. Full script-equivalent dictation, contextual pronunciation, and sense-specific knowledge remain explicitly scheduled in the roadmap.
+The initial UI delivery introduced no database schema migration. Later additive migrations are documented below. Existing graduated items are preserved; the revised due/spacing policy applies to subsequent submissions. Full script-equivalent dictation, contextual pronunciation, and sense-specific knowledge remain explicitly scheduled in the roadmap.
 
 ## Canonical forms / selected readings follow-up
 
@@ -83,3 +83,16 @@ The Watch transcript now offers “Correct line” and a Radix dialog for Chines
 A collapsible source panel shows available Chinese/English subtitle tracks, preserves explicit choices, reports queued work, and offers playback repair. Transcript provenance distinguishes corrected/source/estimated timing; interpolated timings are identified. Checked dictation reports when its source changed and retains its original target/score. [Mobile editor screenshot](screenshots/correction-editor-mobile.png) was inspected at 390px. The screenshot is from the production React app with synthetic API/media fixtures, with history expanded and the form scrolled.
 
 Combined validation now passes 151 backend tests, 26 frontend unit tests, and 33 Chromium checks. The new editor has a passing WCAG-tagged axe scan, focus restoration, correction/reset/restore, conflict recovery, live transcript refresh, source-selection/repair, and historical dictation checks. Automated scans do not establish full WCAG compliance. Manual screen-reader, Safari/iPad, 200% zoom, real-library profiling, live Anki, and the running Caddy stack remain unverified. See [source reliability delivery](SOURCE_RELIABILITY.md).
+
+
+## Learner evidence and recommendation follow-up
+
+Home now separates indexed library words from recorded encounters, labels indexed counts, includes common beginner words, and shows task-specific practice evidence. Optional goal/level/script/title-interest preferences use labelled native selects and explicit save/error states. Recommendations show vocabulary familiarity, unfamiliar occurrences per minute, expandable reasons, subtitle pace/source warnings, and the ignored-word denominator. The Word page separates independent encounters from legacy counters and shows dated self-graded retrieval scoped to selected reading/meaning. Pronunciation/production remain unassessed. Watch adds optional task-specific difficulty feedback with save/retry and pressed-state feedback. Shared keyboard outlines now cover selects and textareas.
+
+The existing React 19/Tailwind/Radix/TanStack stack was retained. Browser inspection covered the actual production build at 390px with synthetic fixtures, including preference saves, library/encountered empty states, expanded explanations, evidence limits, and failed difficulty submission/retry. WCAG-tagged axe checks on the expanded new surfaces, labels, touch targets, and horizontal-overflow checks pass. Screenshot capture resets scroll/focus after axe to avoid recording fixed navigation at an intermediate scroll position.
+
+- [Learning preferences on mobile](screenshots/learner-profile-mobile.png)
+- [Recommendations and practice evidence on mobile](screenshots/recommendations-mobile.png)
+- [Selected reading/meaning evidence on mobile](screenshots/word-evidence-mobile.png)
+
+Combined validation: **165 backend tests, 26 frontend unit tests, and 37 Chromium checks pass**, with TypeScript/Vite build and core Python correctness/whitespace checks. A synthetic local service benchmark over 250 items / 40,000 sentences / 320,000 token occurrences returned recommendations in median 164 ms and dashboard aggregation in 74 ms. This is not end-to-end latency or representative-hardware certification. [Migration, evidence policy, recommendation formulas, and remaining learning/validation gates](LEARNER_EVIDENCE.md) are documented separately. Manual screen-reader, Safari/iPad, zoom, real-library CPU/GPU work, live Anki and Caddy runtime checks remain open.

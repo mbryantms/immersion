@@ -42,7 +42,7 @@ def stream_url(item: MediaItem, root_slug: str) -> str:
 
 def coverage_by_item(session: Session, item_ids: list[int]) -> dict[int, dict]:
     """item_id -> {coverage, tokens, unknown_lexemes}; coverage counts known +
-    familiar (passively-acquired, derive.py) tokens over non-ignored tokens."""
+    familiar (exposure estimates, derive.py) tokens over non-ignored tokens."""
     if not item_ids:
         return {}
     known = case((KnowledgeState.state.in_(("known", "familiar")), 1), else_=0)
@@ -69,6 +69,8 @@ def coverage_by_item(session: Session, item_ids: list[int]) -> dict[int, dict]:
             "coverage": round((known_n or 0) / denom, 4),
             "tokens": total,
             "unknown_lexemes": unknown_n or 0,
+            "ignored_tokens": ignored_n or 0,
+            "eligible_tokens": total-(ignored_n or 0),
         }
     return out
 
@@ -146,33 +148,15 @@ def get_library(session: Session = Depends(get_session)):
 
 @router.get("/recommendations")
 def recommendations(session: Session = Depends(get_session)):
-    """i+1 picks: ready, unfinished items whose known+familiar coverage sits in
-    the comprehension sweet spot — hard enough to feed acquisition, easy enough
-    to follow. Sorted by closeness to the target, ties broken by series order."""
-    LOW, TARGET, HIGH = 0.88, 0.95, 0.985
-    items = session.scalars(
-        select(MediaItem).where(MediaItem.available, MediaItem.ready)
-    ).all()
-    completed = {
-        p.item_id
-        for p in session.scalars(select(PlaybackProgress).where(PlaybackProgress.completed))
-    }
-    candidates = [i for i in items if i.id not in completed]
-    cov = coverage_by_item(session, [i.id for i in candidates])
-    scored = [
-        (abs(cov[i.id]["coverage"] - TARGET), i, cov[i.id])
-        for i in candidates
-        if i.id in cov and LOW <= cov[i.id]["coverage"] <= HIGH
-    ]
-    fallback = not scored
-    if fallback:
-        # cold start: nothing reaches the band yet (young knowledge base) —
-        # the most-familiar unfinished items are still the best next input
-        scored = [
-            (1 - cov[i.id]["coverage"], i, cov[i.id])
-            for i in candidates if i.id in cov
-        ]
-    scored.sort(key=lambda t: (t[0], t[1].series_id or 0, t[1].ordinal or 0))
+    """Rank unfinished content by visible, uncertain difficulty signals."""
+    from ..recommendations import rank_content
+    LOW, HIGH = 0.88, 0.985  # legacy display contract; not a selection gate
+    items = session.scalars(select(MediaItem).where(MediaItem.available, MediaItem.ready)).all()
+    completed = set(session.scalars(select(PlaybackProgress.item_id).where(PlaybackProgress.completed)))
+    candidates = [item for item in items if item.id not in completed]
+    cov = coverage_by_item(session, [item.id for item in candidates])
+    scored = rank_content(session, candidates, cov)
+    fallback = not any(c["coverage"] >= LOW for _, _, c in scored)
     series_titles = {s.id: s.title for s in session.scalars(select(Series))}
     return {
         "band": {"low": LOW, "high": HIGH},
@@ -186,7 +170,7 @@ def recommendations(session: Session = Depends(get_session)):
                 "duration_ms": i.duration_ms,
                 "thumb_url": f"/media/thumbs/{i.id}.jpg?v={i.fingerprint or 'legacy'}",
                 "coverage": c["coverage"],
-                "unknown_lexemes": c["unknown_lexemes"],
+                **c,
             }
             for _, i, c in scored[:6]
         ],
@@ -275,8 +259,8 @@ def get_item(item_id: int, session: Session = Depends(get_session)):
     ids = [s.id for s in siblings]
     pos = ids.index(item_id) if item_id in ids else -1
 
-    # captions-off rewatch nudge: mastered content, watched through, and barely
-    # any recent dictionary reliance — suggest rewatching without subtitles
+    # Offer an optional listening sample after completion and high estimated
+    # vocabulary familiarity; this is not a measured comprehension decision.
     coverage = cov.get(item_id, {}).get("coverage", 0)
     rewatch_nudge = False
     if item.ready and progress is not None and progress.completed and coverage >= 0.95:
@@ -384,3 +368,19 @@ def repair_media(item_id: int, session: Session = Depends(get_session)):
     kind = "repair_media"
     job = enqueue(session, kind, {"item_id": item.id})
     return {"queued": job is not None}
+
+
+class DifficultyRating(BaseModel):
+    rating: str = Field(pattern="^(too_easy|manageable|too_hard)$")
+    goal: str = Field(pattern="^(read|listen|dictate)$")
+    position_ms: int = Field(default=0, ge=0)
+
+
+@router.post("/items/{item_id}/difficulty")
+def rate_difficulty(item_id: int, body: DifficultyRating, session: Session = Depends(get_session)):
+    if session.get(MediaItem, item_id) is None:
+        raise HTTPException(404)
+    session.add(Event(type="difficulty_rating", item_id=item_id, study_mode=body.goal,
+        position_ms=body.position_ms, data={"rating": body.rating, "method": "self_report"}))
+    session.commit()
+    return {"saved": True}
