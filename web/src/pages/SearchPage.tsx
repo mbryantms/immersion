@@ -9,13 +9,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSearch } from "../api/queries";
+import { QueryError } from "@/components/ErrorBoundary";
 
 const examples = ["磨坊", "mò fáng", "I think"];
 
 export default function SearchPage() {
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
-  const { data, isFetching } = useSearch(query);
+  const { data, isFetching, isError, refetch } = useSearch(query);
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
@@ -32,7 +33,7 @@ export default function SearchPage() {
           <form onSubmit={submit} className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input autoFocus value={input} onChange={(event) => setInput(event.target.value)} placeholder="Search 磨坊, mò fáng, or miller…" className="h-11 bg-background/45 pl-9 pr-9 font-zh text-base" />
+              <Input aria-label="Search Chinese, pinyin, or English" maxLength={100} value={input} onChange={(event) => setInput(event.target.value)} placeholder="Search 磨坊, mò fáng, or miller…" className="h-11 bg-background/45 pl-9 pr-9 font-zh text-base" />
               {input && <Button type="button" variant="ghost" size="icon-sm" className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setInput("")} aria-label="Clear search"><X /></Button>}
             </div>
             <Button type="submit" className="h-11 px-5" disabled={!input.trim() || isFetching}>{isFetching ? "Searching…" : "Search"}</Button>
@@ -41,7 +42,7 @@ export default function SearchPage() {
         </CardContent>
       </Card>
 
-      {isFetching ? <div className="space-y-2">{[1, 2, 3].map((item) => <Skeleton key={item} className="h-28 rounded-2xl" />)}</div> : data ? (
+      {isError ? <QueryError message="Search could not be completed. Your query is still here; try again." onRetry={() => void refetch()} /> : isFetching ? <div className="space-y-2">{[1, 2, 3].map((item) => <Skeleton key={item} className="h-28 rounded-2xl" />)}</div> : data ? (
         <section>
           <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">Results for “{data.query}”</h2><Badge variant="secondary">{data.results.length} matches</Badge></div>
           {!data.results.length ? <EmptyState title="No matching context" description="Try another form of the word, remove tone marks, or search a shorter phrase." icon={<SearchX className="size-5" />} /> : (

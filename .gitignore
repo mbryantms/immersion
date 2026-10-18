@@ -7,5 +7,7 @@ web/dist/
 .env
 *.log
 .playwright-mcp/
+web/test-results/
+web/playwright-report/
 # debug screenshots dropped in the repo root during dev sessions
 /*.png

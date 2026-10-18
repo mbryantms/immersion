@@ -2,7 +2,7 @@
 // LCS-scored feedback. Answers stay hidden until a sentence is checked —
 // this is listening practice, not copying. Ported from the podreader page.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { KnowledgeStateName, SentenceOut, Word } from "../api/types";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +50,7 @@ export default function DictationPanel({
   onArmSentence,
 }: Props) {
   const storageKey = `dict:${itemId}`;
+  const [storageError, setStorageError] = useState(false);
   const [attempts, setAttempts] = useState<Record<number, Attempt>>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(storageKey) ?? "{}") as StoredAttempts | Record<number, Attempt>;
@@ -66,9 +67,42 @@ export default function DictationPanel({
       return {};
     }
   });
+  const latestAttempts = useRef(attempts);
+  latestAttempts.current = attempts;
+  const persistAttempts = useCallback(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ version: 2, attempts: latestAttempts.current } satisfies StoredAttempts));
+      setStorageError(false);
+    } catch { setStorageError(true); }
+  }, [storageKey]);
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify({ version: 2, attempts } satisfies StoredAttempts));
-  }, [attempts, storageKey]);
+    const timer = window.setTimeout(persistAttempts, 400);
+    return () => clearTimeout(timer);
+  }, [attempts, persistAttempts]);
+  useEffect(() => {
+    const saveOnHide = () => { if (document.visibilityState === "hidden") persistAttempts(); };
+    document.addEventListener("visibilitychange", saveOnHide);
+    return () => {
+      document.removeEventListener("visibilitychange", saveOnHide);
+      try { localStorage.setItem(storageKey, JSON.stringify({ version: 2, attempts: latestAttempts.current } satisfies StoredAttempts)); } catch { /* retain in memory until unmount */ }
+    };
+  }, [persistAttempts, storageKey]);
+  const scoreCache = useRef(new Map<number, { zh: string; typed: string; result: DictationResult }>());
+  const results = useMemo(() => {
+    const out: Record<number, DictationResult> = {};
+    for (const sentence of sentences) {
+      const attempt = attempts[sentence.id];
+      if (attempt?.checked) {
+        let cached = scoreCache.current.get(sentence.id);
+        if (!cached || cached.zh !== sentence.zh || cached.typed !== attempt.typed) {
+          cached = { zh: sentence.zh, typed: attempt.typed, result: scoreAttempt(sentence.zh, attempt.typed) };
+          scoreCache.current.set(sentence.id, cached);
+        }
+        out[sentence.id] = cached.result;
+      }
+    }
+    return out;
+  }, [attempts, sentences]);
 
   // per-sentence playback with a stop point at t1 (rAF; timeupdate is too coarse)
   const stopAtMs = useRef<number | null>(null);
@@ -100,22 +134,16 @@ export default function DictationPanel({
 
   const check = useCallback(
     (s: SentenceOut, ordinalKey: number) => {
-      setAttempts((prev) => {
-        const a = prev[ordinalKey];
-        if (!a?.typed && !a?.checked) return prev;
-        if (!a.checked) {
-          const result = scoreAttempt(s.zh, a.typed);
-          track("review_outcome", {
-            item_id: itemId,
-            sentence_id: s.id,
-            study_mode: "dictation",
-            data: { score: Math.round(result.score * 100) },
-          });
-        }
-        return { ...prev, [ordinalKey]: { ...a, checked: true } };
+      const a = attempts[ordinalKey];
+      if (!a?.typed || a.checked) return;
+      const result = scoreAttempt(s.zh, a.typed);
+      track("review_outcome", {
+        item_id: itemId, sentence_id: s.id, study_mode: "dictation",
+        data: { score: Math.round(result.score * 100) },
       });
+      setAttempts((prev) => ({ ...prev, [ordinalKey]: { ...a, checked: true } }));
     },
-    [itemId],
+    [itemId, attempts],
   );
 
   const done = Object.values(attempts).filter((a) => a.checked).length;
@@ -131,7 +159,8 @@ export default function DictationPanel({
                 {done}/{sentences.length} checked
               </Badge>
             </div>
-            <p className="mt-0.5 text-xs text-stone-500">Play a line, type what you hear, press Enter</p>
+            <p className="mt-1 text-sm leading-relaxed text-stone-400">Play a line, type what you hear, then press Enter.</p>
+            <p className="mt-1 text-xs leading-relaxed text-stone-400">Names and numbers count. Punctuation and spaces are ignored; use the transcript’s character script.</p>
           </div>
           {done > 0 && (
             <Button
@@ -146,10 +175,12 @@ export default function DictationPanel({
         </div>
       </div>
 
+      {storageError && <p role="status" className="border-b border-border px-4 py-3 text-sm text-amber-200">This browser could not save your attempts. Keep this page open to retain them.</p>}
+
       <div className="min-h-0 flex-1 overflow-y-auto">
         {sentences.map((s, idx) => {
           const attempt = attempts[s.id] ?? { typed: "", checked: false };
-          const result: DictationResult | null = attempt.checked ? scoreAttempt(s.zh, attempt.typed) : null;
+          const result: DictationResult | null = results[s.id] ?? null;
           const active = idx === currentIdx;
           return (
             <div
@@ -171,6 +202,10 @@ export default function DictationPanel({
                 <span className="w-10 shrink-0 text-right text-[10px] tabular-nums text-stone-600">{fmt(s.t0)}</span>
                 <Input
                   lang="zh-CN"
+                  aria-label={`Dictation answer for sentence ${idx + 1}`}
+                  maxLength={512}
+                  autoComplete="off"
+                  spellCheck={false}
                   value={attempt.typed}
                   onChange={(e) =>
                     setAttempts((prev) => ({ ...prev, [s.id]: { typed: e.target.value, checked: false } }))
@@ -180,10 +215,12 @@ export default function DictationPanel({
                     e.stopPropagation(); // keep player shortcuts out of the input
                   }}
                   placeholder="听写…"
-                  className="h-8 border-white/10 bg-black/20 font-zh text-sm text-stone-100 placeholder:text-stone-600"
+                  className="h-11 border-white/10 bg-black/20 font-zh text-base text-stone-100 placeholder:text-stone-400"
                 />
                 {result ? (
                   <Badge
+                    role="status"
+                    aria-label={`${Math.round(result.score * 100)} percent character accuracy`}
                     className={
                       result.score >= PASS_SCORE
                         ? "bg-emerald-400/15 text-emerald-300"

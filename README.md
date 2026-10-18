@@ -7,6 +7,11 @@ Anki bridge. Successor to the static-site podcast reader; plan and rationale in
 
 ## Layout
 
+The [Mandarin learning and interface roadmap](docs/ROADMAP.md) tracks the audit,
+delivery sequence, remaining issues, and acceptance criteria. See the
+[UI inspection and validation record](docs/UI_REVIEW.md) for interface changes
+and verification limits.
+
 - `server/` — FastAPI + SQLite (WAL) + Alembic. `src/app/lingua/` is the ported
   podreader NLP core (HanLP segmentation + CC-CEDICT reconcile, pypinyin,
   OpenCC traditional). `src/app/ingest/` scans media roots, parses subtitles

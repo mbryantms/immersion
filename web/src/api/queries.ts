@@ -21,14 +21,16 @@ export const useSeries = (id: number) =>
   useQuery({ queryKey: ["series", id], queryFn: () => get<SeriesDetail>(`/series/${id}`) });
 
 export const useItem = (id: number) =>
-  useQuery({ queryKey: ["item", id], queryFn: () => get<ItemDetail>(`/items/${id}`) });
+  useQuery({ queryKey: ["item", id], queryFn: () => get<ItemDetail>(`/items/${id}`),
+    refetchInterval: (query) => query.state.data?.ready ? false : 5000 });
 
 export const useSentences = (itemId: number) =>
   useQuery({
     queryKey: ["sentences", itemId],
     queryFn: () => get<{ item_id: number; zh_offset_ms: number; sentences: SentenceOut[] }>(
       `/items/${itemId}/sentences`),
-    staleTime: Infinity, // immutable per content revision (server also ETags it)
+    staleTime: 15_000,
+    refetchInterval: 15_000, // background alignment/translation may revise the payload
   });
 
 export const useKnowledge = (itemId: number) =>
@@ -164,9 +166,10 @@ export const useReviewQueue = () =>
     queryKey: ["review-queue"],
     queryFn: () => get<{ due: number; items: import("./types").ReviewItem[] }>("/review/queue"),
     staleTime: 0,
+    refetchOnWindowFocus: false, // keep the active review session stable
   });
 
-export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string }) =>
+export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string; request_uuid?: string }) =>
   post<import("./types").ReviewOutcome>(`/review/${savedItemId}/outcome`, body);
 
 export const useRecommendations = () =>

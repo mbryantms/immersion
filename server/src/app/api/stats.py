@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_session
 from ..models import (
+    AnkiLink,
     Event,
     KnowledgeState,
     Lexeme,
@@ -103,7 +104,12 @@ def dashboard(session: Session = Depends(get_session)):
 
     review_due = _review_due_count(session)
     graduated = session.scalar(
-        select(func.count()).select_from(ReviewState).where(ReviewState.graduated.is_(True))
+        select(func.count()).select_from(ReviewState)
+        .join(SavedItem, SavedItem.id == ReviewState.saved_item_id)
+        .where(ReviewState.graduated.is_(True), SavedItem.archived.is_(False))
+        .where(~select(1).select_from(AnkiLink)
+               .where(AnkiLink.saved_item_id == SavedItem.id)
+               .exists())
     )
     last_import = session.get(Setting, "anki_last_import")
     last_export = session.get(Setting, "anki_last_export")

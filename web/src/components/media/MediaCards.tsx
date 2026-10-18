@@ -15,7 +15,7 @@ export function ContinueCard({ item, className }: { item: ContinueItem; classNam
         <span className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/20">
           <span className="flex size-10 scale-90 items-center justify-center rounded-full bg-background/90 text-primary opacity-0 shadow-xl transition group-hover:scale-100 group-hover:opacity-100"><Play className="ml-0.5 size-4 fill-current" /></span>
         </span>
-        <Progress value={percent} className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-black/35" />
+        <Progress aria-label="Playback completion" value={percent} className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-black/35" />
       </div>
       <div className="px-3 py-2.5">
         <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
@@ -38,7 +38,7 @@ export function SeriesCard({ series }: { series: SeriesSummary }) {
           {series.kind === "podcast" ? (
             <Badge className="gap-1 border-white/8 bg-black/65 text-[10px] text-stone-200 backdrop-blur"><Headphones className="size-3" /> Podcast</Badge>
           ) : <span />}
-          {series.coverage != null && <Badge className="border-white/8 bg-black/65 text-[10px] tabular-nums text-teal-200 backdrop-blur">{Math.round(series.coverage * 100)}% familiar</Badge>}
+          {series.coverage != null && <Badge className="border-white/8 bg-black/65 text-[10px] tabular-nums text-teal-200 backdrop-blur">{Math.round(series.coverage * 100)}% vocabulary familiarity</Badge>}
         </div>
       </div>
       <div className="p-3">
@@ -47,7 +47,7 @@ export function SeriesCard({ series }: { series: SeriesSummary }) {
           <span>{series.episodes} episode{series.episodes === 1 ? "" : "s"}</span>
           <span>{series.ready}/{series.episodes} ready</span>
         </div>
-        <Progress value={series.episodes ? (series.ready / series.episodes) * 100 : 0} className="mt-2 bg-muted" />
+        <Progress aria-label="Episodes ready for study" value={series.episodes ? (series.ready / series.episodes) * 100 : 0} className="mt-2 bg-muted" />
       </div>
     </Link>
   );
@@ -64,14 +64,14 @@ export function EpisodeCard({ episode, index }: { episode: EpisodeSummary; index
           <Badge className="bg-black/65 text-[10px] text-stone-200 backdrop-blur">Episode {episode.ordinal ?? index + 1}</Badge>
           {episode.completed && <CheckCircle2 className="size-5 fill-emerald-400 text-emerald-950" />}
         </div>
-        {percent > 0 && <Progress value={percent} className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-black/35" />}
+        {percent > 0 && <Progress aria-label="Playback completion" value={percent} className="absolute inset-x-0 bottom-0 h-1 rounded-none bg-black/35" />}
       </div>
       <div className="p-3">
         <p className="truncate text-sm font-medium text-foreground">{episode.title}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {episode.duration_ms && <span className="flex items-center gap-1"><Clock3 className="size-3" />{Math.round(episode.duration_ms / 60000)} min</span>}
           {!episode.ready && <span className="flex items-center gap-1 text-amber-300/80">{episode.has_zh ? "Processing" : <><CaptionsOff className="size-3" />No subtitles</>}</span>}
-          {episode.coverage !== undefined && <span className="ml-auto text-primary/80">{Math.round(episode.coverage * 100)}% familiar</span>}
+          {episode.coverage !== undefined && <span className="ml-auto text-primary/80">{Math.round(episode.coverage * 100)}% vocabulary familiarity</span>}
         </div>
         {episode.unknown_lexemes !== undefined && <p className="mt-1 text-[10px] text-muted-foreground">{episode.unknown_lexemes} words not yet known</p>}
       </div>

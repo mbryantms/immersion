@@ -32,15 +32,22 @@ import SubtitleOverlay from "../player/SubtitleOverlay";
 import TranscriptPanel from "../player/TranscriptPanel";
 import { useKeyboard } from "../player/useKeyboard";
 import { useSentenceClock, type MediaEl } from "../player/useSentenceClock";
+import StudyModeSelector from "../player/StudyModeSelector";
+import { textIsVisible, type StudyMode } from "../player/studyMode";
 
 export default function WatchPage() {
+  const { id } = useParams();
+  return <WatchSession key={id} />;
+}
+
+function WatchSession() {
   const id = Number(useParams().id);
   const navigate = useNavigate();
   const videoRef = useRef<MediaEl | null>(null);
   const playerRef = useRef<HTMLDivElement | null>(null);
 
   const { data: item, isError: itemError, refetch: refetchItem } = useItem(id);
-  const { data: sentData } = useSentences(id);
+  const { data: sentData, isError: sentencesError, refetch: refetchSentences } = useSentences(id);
   const { data: knowledgeData } = useKnowledge(id);
   const knowledge = knowledgeData?.states ?? {};
   const savedLexemes = useMemo(() => new Set(knowledgeData?.saved ?? []), [knowledgeData]);
@@ -48,7 +55,11 @@ export default function WatchPage() {
   const isAudio = item?.kind === "audio";
   const prefs = usePrefs();
   const [loop, setLoop] = useState(false);
-  const [dictation, setDictation] = useState(false);
+  const [studyMode, setStudyMode] = useState<StudyMode>("read");
+  const [listeningHint, setListeningHint] = useState(false);
+  const [playbackError, setPlaybackError] = useState(false);
+  const showText = textIsVisible(studyMode, listeningHint);
+  const effectiveSubtitleMode = showText ? prefs.subtitleMode : "off";
   const [gloss, setGloss] = useState<GlossTarget | null>(null);
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
   const [enRevealed, setEnRevealed] = useState<Set<number>>(new Set());
@@ -78,13 +89,33 @@ export default function WatchPage() {
     pauseAfterDelayMs: prefs.pauseAfterDelayMs,
     loop,
     interactionHold: !!gloss,
-    subtitleMode: prefs.subtitleMode,
+    subtitleMode: effectiveSubtitleMode,
     itemId: id,
   });
   const current = idx >= 0 ? sentences[idx] : null;
 
   const setKnowledge = useSetKnowledge(id);
   const saveItem = useSaveItem(id);
+  const changeStudyMode = useCallback((mode: StudyMode) => {
+    setStudyMode(mode);
+    setListeningHint(false);
+    setGloss(null);
+    setExplainFor(null);
+    track("study_mode_change", { item_id: id, study_mode: mode });
+  }, [id]);
+
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return;
+    const onError = () => setPlaybackError(true);
+    const onLoaded = () => setPlaybackError(false);
+    media.addEventListener("error", onError);
+    media.addEventListener("loadeddata", onLoaded);
+    return () => {
+      media.removeEventListener("error", onError);
+      media.removeEventListener("loadeddata", onLoaded);
+    };
+  }, [item]);
 
   useEffect(() => {
     const onFullscreenChange = () => setIsPlayerFullscreen(document.fullscreenElement === playerRef.current);
@@ -331,13 +362,13 @@ export default function WatchPage() {
       if (next && prefs.pauseAfter) prefs.set({ pauseAfter: false });
       return next;
     }),
-    s: () => prefs.set({ subtitleMode: cycleSubtitleMode(prefs.subtitleMode) }),
-    t: () => current && (enRevealed.has(current.id)
+    s: () => { if (showText) prefs.set({ subtitleMode: cycleSubtitleMode(prefs.subtitleMode) }); },
+    t: () => showText && current && (enRevealed.has(current.id)
       ? setEnRevealed((p) => { const n = new Set(p); n.delete(current.id); return n; })
       : revealEn(current)),
-    p: () => current && togglePinyinSentence(current),
+    p: () => showText && current && togglePinyinSentence(current),
     d: () => {
-      if (!current) return;
+      if (!current || !showText) return;
       const w = current.words.find((w) => w.type === "zh" && (!w.lex || (knowledge[w.lex] ?? "new") === "new"))
         ?? current.words.find((w) => w.type === "zh");
       if (w) openGloss(current, w);
@@ -369,7 +400,7 @@ export default function WatchPage() {
   }
 
   return (
-    <div className="watch-page min-h-[calc(100vh-53px)]" onMouseUp={onMouseUp}>
+    <main className="watch-page min-h-[calc(100vh-53px)]" onMouseUp={onMouseUp}>
       {/* xl pins the page to the viewport so the transcript scrolls inside its
           panel (follow mode needs the panel, not the page, to be the scroller) */}
       <div className="mx-auto flex min-h-[calc(100vh-53px)] max-w-[1680px] flex-col px-3 py-4 sm:px-5 lg:px-6 xl:h-[calc(100vh-53px)]">
@@ -388,7 +419,7 @@ export default function WatchPage() {
               <Link to="/library" className="mb-1.5 inline-block text-xs font-medium text-stone-500 transition hover:text-teal-300">Library</Link>
             )}
             <div className="flex items-center gap-3">
-              <h1 className="truncate text-xl font-semibold tracking-[-0.02em] text-stone-50 sm:text-2xl">{item.title}</h1>
+              <h1 className="min-w-0 break-words text-xl font-semibold tracking-[-0.02em] text-stone-50 sm:truncate sm:text-2xl">{item.title}</h1>
               {item.series?.level && (
                 <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide text-primary">Level {item.series.level}</Badge>
               )}
@@ -400,8 +431,8 @@ export default function WatchPage() {
               <div className="flex items-center gap-2 rounded-xl border border-white/7 bg-white/[0.035] px-3 py-2">
                 <ProgressRing value={item.coverage ?? 0} />
                 <div>
-                  <p className="text-xs font-semibold text-stone-200">{Math.round((item.coverage ?? 0) * 100)}% familiar</p>
-                  <p className="text-[10px] text-stone-500">{item.unknown_lexemes ?? 0} words to learn</p>
+                  <p className="text-xs font-semibold text-stone-200">{Math.round((item.coverage ?? 0) * 100)}% vocabulary familiarity</p>
+                  <p className="text-[11px] text-stone-400">Estimate · {item.unknown_lexemes ?? 0} unmarked words</p>
                 </div>
               </div>
             )}
@@ -435,8 +466,8 @@ export default function WatchPage() {
         {item.rewatch_nudge && !nudgeHidden && (
           <div className="mb-3 flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-teal-400/15 bg-teal-400/6 px-4 py-2.5 text-sm text-teal-100">
             <span>
-              You know {Math.round((item.coverage ?? 0) * 100)}% of this episode — try a rewatch with
-              captions off and let your ears do the work.
+              This episode has high estimated vocabulary familiarity. Try listening without text
+              to check how much you understand.
             </span>
             <span className="grow" />
             <Button
@@ -444,13 +475,13 @@ export default function WatchPage() {
               variant="secondary"
               className="border border-teal-400/20 bg-teal-400/10 text-teal-200 hover:bg-teal-400/20"
               onClick={() => {
-                prefs.set({ subtitleMode: "off" });
+                changeStudyMode("listen");
                 localStorage.setItem(`rewatch-nudge-${id}`, "1");
                 setNudgeHidden(true);
                 track("rewatch_nudge_accept", { item_id: id });
               }}
             >
-              Captions off
+              Listen without text
             </Button>
             <Button
               size="xs"
@@ -486,8 +517,13 @@ export default function WatchPage() {
           </div>
         )}
 
+        <StudyModeSelector value={studyMode} onChange={changeStudyMode} />
+
+        {sentencesError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm"><p className="grow">The transcript could not be loaded. Your media can still play.</p><Button variant="outline" size="sm" onClick={() => void refetchSentences()}>Retry transcript</Button></div>}
+        {playbackError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm"><p className="grow">This media could not play. Check the source file or its conversion status in Admin.</p><Button variant="outline" size="sm" onClick={() => { setPlaybackError(false); videoRef.current?.load(); }}>Retry playback</Button><Button asChild variant="ghost" size="sm"><Link to="/admin">Open Admin</Link></Button></div>}
+
         <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_410px]">
-          <main className="flex min-h-0 min-w-0 flex-col gap-3">
+          <section aria-label="Media player" className="flex min-h-0 min-w-0 flex-col gap-3">
             <div ref={playerRef} className="player-shell flex flex-col overflow-hidden rounded-2xl border border-white/8 bg-[#111715] shadow-2xl shadow-black/25 xl:min-h-0 xl:flex-1">
               {isAudio ? (
                 <AudioSurface
@@ -501,7 +537,7 @@ export default function WatchPage() {
                   <SubtitleOverlay
                     sentence={current}
                     visible={visible || (!!gloss && gloss.sentence.id === current?.id)}
-                    mode={prefs.subtitleMode}
+                    mode={effectiveSubtitleMode}
                     knowledge={knowledge}
                     savedLexemes={savedLexemes}
                     traditional={prefs.traditional}
@@ -533,7 +569,7 @@ export default function WatchPage() {
                 <SubtitleOverlay
                   sentence={current}
                   visible={visible || (!!gloss && gloss.sentence.id === current?.id)}
-                  mode={prefs.subtitleMode}
+                  mode={effectiveSubtitleMode}
                   knowledge={knowledge}
                   savedLexemes={savedLexemes}
                   traditional={prefs.traditional}
@@ -575,19 +611,18 @@ export default function WatchPage() {
                   prefs.set({ rate: r });
                   if (videoRef.current) videoRef.current.playbackRate = r;
                 }}
-                mode={prefs.subtitleMode}
+                mode={effectiveSubtitleMode}
                 onCycleMode={() => prefs.set({ subtitleMode: cycleSubtitleMode(prefs.subtitleMode) })}
                 traditional={prefs.traditional}
                 onToggleTraditional={() => prefs.set({ traditional: !prefs.traditional })}
                 pinyin={prefs.pinyin}
                 onTogglePinyin={() => prefs.set({ pinyin: !prefs.pinyin })}
-                dictation={dictation}
-                onToggleDictation={isAudio ? () => setDictation((x) => !x) : undefined}
+                textControlsDisabled={!showText}
               />
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center gap-2 px-1 text-[11px] text-stone-600">
-              <span className="flex items-center gap-1.5"><CursorIcon /> Tap a word for definitions</span>
+              {showText && <span className="flex items-center gap-1.5"><CursorIcon /> Tap a word for definitions</span>}
               {autoPaused && !gloss && (
                 <Button
                   variant="secondary"
@@ -602,7 +637,7 @@ export default function WatchPage() {
               {current && (
                 <Badge variant="secondary" className="tabular-nums text-[10px] text-muted-foreground">Sentence {idx + 1} of {sentences.length}</Badge>
               )}
-              {current?.en && prefs.subtitleMode !== "dual" && (
+              {showText && current?.en && prefs.subtitleMode !== "dual" && (
                 <Button
                   variant="ghost"
                   size="xs"
@@ -626,7 +661,7 @@ export default function WatchPage() {
                   <BookmarkIcon /> Save sentence
                 </Button>
               )}
-              {current && (
+              {showText && current && (
                 <Button
                   variant="ghost"
                   size="xs"
@@ -682,11 +717,12 @@ export default function WatchPage() {
                 </div>
               </details>
             </div>
-          </main>
+          </section>
 
           <aside className="h-[48vh] min-h-[360px] overflow-hidden rounded-2xl border border-white/8 shadow-xl shadow-black/15 xl:h-auto xl:min-h-0">
-            {isAudio && dictation ? (
+            {studyMode === "dictate" ? (
               <DictationPanel
+                key={id}
                 itemId={id}
                 sentences={sentences}
                 currentIdx={idx}
@@ -698,7 +734,20 @@ export default function WatchPage() {
                 onTapWord={openGloss}
                 onArmSentence={(sentence) => armSentence(sentence.id)}
               />
+            ) : studyMode === "listen" && !listeningHint ? (
+              <div className="flex h-full flex-col items-center justify-center gap-4 bg-card px-7 py-10 text-center">
+                <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-2xl" aria-hidden="true">听</div>
+                <h2 className="text-xl font-semibold">Let your ears lead</h2>
+                <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">The transcript, pinyin, and translations are hidden. Replay a sentence before asking for a hint.</p>
+                <Button variant="secondary" onClick={() => {
+                  setListeningHint(true);
+                  track("transcript_hint", { item_id: id, study_mode: "listen", sentence_id: current?.id });
+                }}>Reveal transcript as a hint</Button>
+              </div>
             ) : (
+              <div className="flex h-full min-h-0 flex-col">
+              {studyMode === "listen" && <div className="flex items-center justify-between gap-2 border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground"><span>Transcript hint is visible</span><Button variant="ghost" size="sm" onClick={() => setListeningHint(false)}>Hide text again</Button></div>}
+              {!sentences.length && !sentencesError && <p role="status" className="border-b border-border p-4 text-sm text-muted-foreground">{item.ready ? "No transcript lines are available." : "The transcript is not ready yet. Check processing in Admin."}</p>}
               <TranscriptPanel
                 sentences={sentences}
                 currentIdx={idx}
@@ -714,6 +763,7 @@ export default function WatchPage() {
                 onRevealEn={revealEn}
                 onFontScaleChange={(fontScale) => prefs.set({ transcriptFontScale: fontScale })}
               />
+              </div>
             )}
           </aside>
         </div>
@@ -758,7 +808,7 @@ export default function WatchPage() {
         />,
         isPlayerFullscreen && playerRef.current ? playerRef.current : document.body,
       )}
-    </div>
+    </main>
   );
 }
 

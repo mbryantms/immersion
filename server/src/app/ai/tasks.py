@@ -257,6 +257,12 @@ def translate_item(session: Session, item_id: int, progress=lambda msg: None) ->
                 input_hash=hashlib.sha256(s.zh.encode()).hexdigest()[:16],
                 output={"en": s.en},
             ))
+        from sqlalchemy import text
+
+        for s in chunk:
+            session.execute(text("UPDATE sentence_fts SET en = :en WHERE rowid = :id"),
+                            {"en": s.en, "id": s.id})
+        item.meta = {**(item.meta or {}), "analysis_rev": (item.meta or {}).get("analysis_rev", 0) + 1}
         session.commit()  # per-batch checkpoint: retries resume where en is NULL
         done += len(chunk)
     return {"translated": done, "already_done": len(todo) == 0}

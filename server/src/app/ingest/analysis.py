@@ -227,6 +227,7 @@ def write_sentences(
         snap = ctx.snapshot or {}
         if snap.get("item_id") == item.id and snap.get("zh") in by_zh:
             ctx.sentence_id = by_zh[snap["zh"]]
+    item.meta = {**(item.meta or {}), "analysis_rev": (item.meta or {}).get("analysis_rev", 0) + 1}
     session.flush()
 
 

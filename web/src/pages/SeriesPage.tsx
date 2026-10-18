@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FilterGroup, FilterOption } from "@/components/ui/filter-group";
 import { useSeries } from "../api/queries";
 
 type View = "all" | "ready" | "unfinished";
@@ -41,7 +41,7 @@ export default function SeriesPage() {
         <CardContent className="grid gap-4 py-4 sm:grid-cols-[1fr_auto] sm:items-center">
           <div>
             <div className="mb-2 flex items-center justify-between text-xs"><span className="text-muted-foreground">Series progress</span><span className="font-medium tabular-nums">{completed} of {data.items.length}</span></div>
-            <Progress value={data.items.length ? (completed / data.items.length) * 100 : 0} className="h-1.5" />
+            <Progress aria-label="Series viewing completion" value={data.items.length ? (completed / data.items.length) * 100 : 0} className="h-1.5" />
           </div>
           <div className="flex gap-2"><Badge variant="secondary"><CheckCircle2 className="size-3" />{completed} complete</Badge><Badge variant="secondary"><ListVideo className="size-3" />{ready} available</Badge></div>
         </CardContent>
@@ -50,7 +50,7 @@ export default function SeriesPage() {
       <section>
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">Episodes</h2>
-          <Tabs value={view} onValueChange={(value) => setView(value as View)}><TabsList><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="ready">Ready</TabsTrigger><TabsTrigger value="unfinished">Unfinished</TabsTrigger></TabsList></Tabs>
+          <FilterGroup type="single" aria-label="Filter episodes" value={view} onValueChange={(value) => { if (value) setView(value as View); }}><FilterOption value="all">All</FilterOption><FilterOption value="ready">Ready</FilterOption><FilterOption value="unfinished">Unfinished</FilterOption></FilterGroup>
         </div>
         {items.length ? <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{items.map((episode, index) => <EpisodeCard key={episode.id} episode={episode} index={index} />)}</div> : <EmptyState title="No episodes in this view" description="Try another filter to see the rest of the series." />}
       </section>

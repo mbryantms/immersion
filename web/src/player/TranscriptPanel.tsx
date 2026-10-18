@@ -82,7 +82,7 @@ export default function TranscriptPanel({
                 {sentences.length} lines
               </span>
             </div>
-            <p className="mt-0.5 text-xs text-stone-500">Select any word to explore it</p>
+            <p className="mt-0.5 text-xs text-stone-400">Select any word to explore it</p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <Popover>
@@ -102,12 +102,12 @@ export default function TranscriptPanel({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-stone-100">Transcript text</p>
-                    <p className="mt-0.5 text-xs text-stone-500">Saved for every video</p>
+                    <p className="mt-0.5 text-xs text-stone-400">Saved for every video</p>
                   </div>
                   <span className="rounded-md bg-white/6 px-2 py-1 text-xs font-medium tabular-nums text-teal-300">{Math.round(transcriptScale * 100)}%</span>
                 </div>
                 <div className="mt-4 flex items-center gap-3">
-                  <span className="text-xs text-stone-500" aria-hidden="true">A</span>
+                  <span className="text-xs text-stone-400" aria-hidden="true">A</span>
                   <Slider
                     min={0.85}
                     max={1.6}
@@ -119,7 +119,7 @@ export default function TranscriptPanel({
                   <span className="text-xl leading-none text-stone-300" aria-hidden="true">A</span>
                 </div>
                 <div className="mt-3 flex justify-between border-t border-white/7 pt-3">
-                  <p className="text-[11px] text-stone-500">85–160%</p>
+                  <p className="text-[11px] text-stone-400">85–160%</p>
                   <Button variant="ghost" size="xs" disabled={transcriptScale === 1} onClick={() => onFontScaleChange(1)} className="text-stone-400">Reset</Button>
                 </div>
               </PopoverContent>
@@ -141,13 +141,13 @@ export default function TranscriptPanel({
           </div>
         </div>
 
-        <label className="mt-3 flex h-9 items-center gap-2 rounded-lg border border-white/8 bg-black/15 px-3 text-stone-500 transition focus-within:border-teal-400/40 focus-within:bg-black/25 focus-within:text-stone-300">
+        <label className="mt-3 flex h-9 items-center gap-2 rounded-lg border border-white/8 bg-black/15 px-3 text-stone-400 transition focus-within:border-teal-400/40 focus-within:bg-black/25 focus-within:text-stone-300">
           <SearchIcon />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search Chinese or English"
-            className="min-w-0 flex-1 bg-transparent text-xs text-stone-200 outline-none placeholder:text-stone-600"
+            aria-label="Search this transcript" placeholder="Search Chinese or English"
+            className="min-w-0 flex-1 bg-transparent text-xs text-stone-200 outline-none placeholder:text-stone-400"
           />
           {query && (
             <button type="button" onClick={() => setQuery("")} className="rounded p-0.5 hover:bg-white/10" aria-label="Clear search">
@@ -176,7 +176,7 @@ export default function TranscriptPanel({
                     <button
                       onClick={() => onSeek(s)}
                       title="Play from here"
-                      className={`mt-1 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] tabular-nums transition ${active ? "bg-teal-400/12 text-teal-300" : "text-stone-600 hover:bg-white/5 hover:text-teal-300"}`}
+                      className={`mt-1 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] tabular-nums transition ${active ? "bg-teal-400/12 text-teal-300" : "text-stone-400 hover:bg-white/5 hover:text-teal-300"}`}
                     >
                       {active && <span className="playing-bars"><i /><i /><i /></span>}
                       {fmt(s.t0)}
@@ -212,7 +212,7 @@ export default function TranscriptPanel({
                         ) : (
                           <button
                             onClick={() => onRevealEn(s)}
-                            className="mt-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-stone-600 transition hover:bg-white/5 hover:text-stone-300"
+                            className="mt-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium text-stone-400 transition hover:bg-white/5 hover:text-stone-300"
                           >
                             <EyeIcon /> Reveal translation
                           </button>
@@ -227,12 +227,12 @@ export default function TranscriptPanel({
           <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <SearchIcon large />
             <p className="mt-3 text-sm font-medium text-stone-300">No matching lines</p>
-            <p className="mt-1 text-xs text-stone-600">Try a different word or phrase.</p>
+            <p className="mt-1 text-xs text-stone-400">Try a different word or phrase.</p>
           </div>
         )}
       </div>
 
-      <div className="flex items-center gap-4 border-t border-white/7 px-4 py-2 text-[10px] text-stone-600">
+      <div className="flex items-center gap-4 border-t border-white/7 px-4 py-2 text-[10px] text-stone-400">
         <span className="flex items-center gap-1.5"><i className="size-1.5 rounded-full bg-sky-400" /> New</span>
         <span className="flex items-center gap-1.5"><i className="size-1.5 rounded-full bg-amber-400" /> Learning</span>
         <span className="ml-auto hidden sm:inline">↑ ↓ to move between lines</span>

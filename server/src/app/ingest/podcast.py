@@ -280,6 +280,7 @@ def whisper_align_item(session: Session, item_id: int, progress=lambda msg: None
         s.t0_ms = round(t0 * 1000)
         s.t1_ms = round(t1 * 1000)
     item.ready = True
+    item.meta = {**(item.meta or {}), "analysis_rev": (item.meta or {}).get("analysis_rev", 0) + 1}
     session.commit()
     enqueue(session, "translate_item", {"item_id": item.id})
     return {"aligned": len(sentences)}

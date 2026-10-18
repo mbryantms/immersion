@@ -41,7 +41,7 @@ export default function HomePage() {
       <PageHeader
         eyebrow="Today’s immersion"
         title="Build Mandarin from real context"
-        description="Continue listening, retrieve a few saved words, and let repeated encounters—not isolated drills—guide what you learn next."
+        description="Explore real Mandarin, revisit useful words, and practise understanding with less support over time."
         actions={
           <>
             <Button asChild variant="outline"><Link to="/search"><Search />Search corpus</Link></Button>
@@ -70,7 +70,7 @@ export default function HomePage() {
               <CardTitle className="text-sm">Learning activity</CardTitle>
               <Badge variant="secondary" className="text-[10px]">last 6 weeks</Badge>
             </div>
-            <CardDescription>Minutes of comprehensible input</CardDescription>
+            <CardDescription>Media minutes played · an activity estimate</CardDescription>
           </CardHeader>
           <CardContent className="pt-2">
             {statsLoading ? <Skeleton className="h-24 w-full" /> : weeks.length ? (
@@ -99,10 +99,10 @@ export default function HomePage() {
       {!!recs?.items.length && (
         <section>
           <SectionHeader
-            title={recs.fallback ? "Closest to your level" : "In your sweet spot"}
+            title={recs.fallback ? "Most familiar vocabulary" : "Suggested next episodes"}
             description={recs.fallback
-              ? "Your most familiar unfinished episodes — the sweet-spot picks sharpen as your known words grow"
-              : `Episodes ${Math.round(recs.band.low * 100)}–${Math.round(recs.band.high * 100)}% familiar — hard enough to grow on, easy enough to follow`}
+              ? "Unfinished episodes ranked by estimated vocabulary familiarity. Try a short sample to judge the difficulty."
+              : `Estimated vocabulary familiarity of ${Math.round(recs.band.low * 100)}–${Math.round(recs.band.high * 100)}%. Listening speed and grammar also affect difficulty.`}
           />
           <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
             {recs.items.map((rec) => (

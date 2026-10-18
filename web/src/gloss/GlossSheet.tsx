@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { get } from "../api/client";
 import type { KnowledgeStateName, LexemeInfo, SentenceOut, Word } from "../api/types";
@@ -84,6 +85,7 @@ export default function GlossSheet({
   const [candidates, setCandidates] = useState<LexemeInfo[]>(initial);
   const [pick, setPick] = useState(0);
   const dialogRef = useRef<HTMLElement>(null);
+  const returnFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const pinyinStyle = usePrefs((p) => p.pinyinStyle);
 
   useEffect(() => {
@@ -110,7 +112,9 @@ export default function GlossSheet({
   const saved = c.lexeme_id > 0 && savedLexemes.has(c.lexeme_id);
 
   return (
+    <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
     <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center p-3 sm:p-5">
+      <DialogPrimitive.Overlay asChild>
       <button
         type="button"
         className="pointer-events-auto absolute inset-0 cursor-default bg-black/20 backdrop-blur-[1px]"
@@ -118,7 +122,15 @@ export default function GlossSheet({
         aria-label="Close definition and remain paused"
         tabIndex={-1}
       />
+      </DialogPrimitive.Overlay>
       <div className="absolute bottom-0 left-1/2 h-48 w-[min(90vw,760px)] -translate-x-1/2 rounded-full bg-teal-500/8 blur-3xl" />
+      <DialogPrimitive.Content asChild aria-describedby={undefined} onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        dialogRef.current?.focus({ preventScroll: true });
+      }} onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        if (returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true });
+      }}>
       <section
         ref={dialogRef}
         role="dialog"
@@ -128,12 +140,13 @@ export default function GlossSheet({
         className="gloss-popover pointer-events-auto relative flex max-h-[min(560px,calc(100vh-1.5rem))] w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#131a17]/96 shadow-[0_24px_80px_rgba(0,0,0,.58)] backdrop-blur-2xl"
         onClick={(e) => e.stopPropagation()}
       >
+        <DialogPrimitive.Title className="sr-only">Definition for {c.simplified}</DialogPrimitive.Title>
         <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-white/10 sm:hidden" />
 
         <header className="relative shrink-0 border-b border-white/7 px-4 pb-4 pt-3 sm:px-5 sm:pt-5">
           <button
             onClick={onClose}
-            className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full text-stone-500 transition hover:bg-white/7 hover:text-stone-100 focus-visible:outline-2 focus-visible:outline-teal-400"
+            className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full text-stone-400 transition hover:bg-white/7 hover:text-stone-100 focus-visible:outline-2 focus-visible:outline-teal-400"
             aria-label="Close definition"
             title="Close (Esc)"
           >
@@ -159,26 +172,26 @@ export default function GlossSheet({
                 {freqBand(c.freq_rank) && (
                   <span title={`frequency rank #${c.freq_rank?.toLocaleString()}`} className="rounded-md border border-white/8 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-400">{freqBand(c.freq_rank)}</span>
                 )}
-                <span className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-stone-500">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-stone-400">
                   <i className={`size-1.5 rounded-full ${stateDot[state]}`} />
                   {stateLabel[state]}
                 </span>
               </div>
               {c.stats ? (
-                <p className="mt-2 text-[11px] text-stone-600">
+                <p className="mt-2 text-[11px] text-stone-400">
                   Encountered <span className="text-stone-400">{c.stats.encounters}×</span>
                   <span className="mx-1.5 text-stone-700">·</span>
                   Looked up <span className="text-stone-400">{c.stats.lookups}×</span>
                 </p>
               ) : (
-                <p className="mt-2 text-[11px] text-stone-600">Tap words while watching to build learning history.</p>
+                <p className="mt-2 text-[11px] text-stone-400">Tap words while watching to build learning history.</p>
               )}
             </div>
           </div>
 
           {candidates.length > 1 && (
             <div className="mt-3 flex items-center gap-1.5 overflow-x-auto pl-[4.5rem] sm:pl-20">
-              <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-stone-600">Matches</span>
+              <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-stone-400">Matches</span>
               {candidates.map((candidate, i) => (
                 <button
                   key={`${candidate.lexeme_id}-${i}`}
@@ -195,7 +208,7 @@ export default function GlossSheet({
         <div className="flex shrink-0 items-center gap-3 border-b border-teal-300/10 bg-teal-400/[0.055] px-4 py-2.5 text-xs text-teal-100/75 sm:px-5">
           <span className="flex min-w-0 flex-1 items-center gap-2"><PauseIcon />Playback paused for lookup</span>
           <button type="button" onClick={onResume} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-teal-400 px-3 text-[11px] font-semibold text-teal-950 transition hover:bg-teal-300">
-            <PlayIcon /> Resume <span className="hidden text-teal-900/60 sm:inline">· Space</span>
+            <PlayIcon /> Resume <span className="hidden text-teal-950 sm:inline">· Space</span>
           </button>
         </div>
 
@@ -203,7 +216,7 @@ export default function GlossSheet({
           <div className="space-y-2.5">
             {c.senses.slice(0, 6).map((sense, i) => (
               <div key={i} className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-white/5 text-[10px] tabular-nums text-stone-600">{i + 1}</span>
+                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-white/5 text-[10px] tabular-nums text-stone-400">{i + 1}</span>
                 <p className="min-w-0 text-[13px] leading-relaxed text-stone-200 sm:text-sm">
                   {sense.py && sense.py !== c.pinyin && <span className="mr-2 font-medium text-teal-300/75">{formatPinyin(sense.py, pinyinStyle)}</span>}
                   {sense.defs.join(" · ")}
@@ -213,24 +226,24 @@ export default function GlossSheet({
             {!c.senses.length && (!c.is_dict && c.pos && NAME_NOTE[c.pos] ? (
               <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center">
                 <p className="text-sm text-stone-300">{NAME_NOTE[c.pos]}</p>
-                <p className="mt-1 text-xs text-stone-600">
+                <p className="mt-1 text-xs text-stone-400">
                   Proper names aren't dictionary words — the pinyin shows the standard character readings.
                 </p>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center">
                 <p className="text-sm text-stone-400">No dictionary definition available.</p>
-                <p className="mt-1 text-xs text-stone-600">This may be a name or an out-of-vocabulary expression.</p>
+                <p className="mt-1 text-xs text-stone-400">This may be a name or an out-of-vocabulary expression.</p>
               </div>
             ))}
           </div>
 
           <div className="mt-4 rounded-xl border border-white/7 bg-black/15 px-3.5 py-3">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-600">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-400">
               <ContextIcon /> In this sentence
             </div>
             <p className="font-zh text-base leading-relaxed text-stone-200">{target.sentence.zh}</p>
-            {target.sentence.en && <p className="mt-1 text-xs leading-relaxed text-stone-500">{target.sentence.en}</p>}
+            {target.sentence.en && <p className="mt-1 text-xs leading-relaxed text-stone-400">{target.sentence.en}</p>}
           </div>
         </div>
 
@@ -271,7 +284,9 @@ export default function GlossSheet({
           )}
         </footer>
       </section>
+      </DialogPrimitive.Content>
     </div>
+    </DialogPrimitive.Root>
   );
 }
 

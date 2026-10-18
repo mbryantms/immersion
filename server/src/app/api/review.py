@@ -3,8 +3,8 @@
 Fixed 1d -> 3d -> 7d ladder; fail drops a rung. Word reviews prefer a fresh
 concordance sentence over the saved context (variability); sentence reviews
 are listen-and-reveal, self-graded — no typed input anywhere in review (the
-player's dictation panel owns writing practice). Graduation (>=3 spaced
-successes ending at the top rung) surfaces the item for the Anki export
+player's dictation panel owns writing practice). Initial practice followed by
+three successful delayed reviews surfaces the item for the Anki export
 tray."""
 
 from __future__ import annotations
@@ -12,8 +12,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from ..db import get_session
@@ -25,7 +26,10 @@ from ..models import (
     SavedItem,
     Sentence,
     TokenOccurrence,
+    Lexeme,
+    Sense,
 )
+from ..timing import effective_times
 
 router = APIRouter()
 
@@ -74,16 +78,17 @@ def _sentence_payload(session: Session, s: Sentence) -> dict:
 
     item = session.get(MediaItem, s.item_id)
     root = session.get(MediaRoot, item.root_id) if item else None
+    t0, t1 = effective_times(session, s)
     return {
         "sentence_id": s.id,
         "item_id": s.item_id,
         "item_kind": item.kind if item else None,
         "item_available": bool(item and item.available),
-        "stream_url": stream_url(item, root.slug) if item and root else None,
+        "stream_url": stream_url(item, root.slug) if item and root and item.available else None,
         "zh": s.zh,
         "en": s.en,
-        "t0_ms": s.t0_ms,
-        "t1_ms": s.t1_ms,
+        "t0_ms": t0,
+        "t1_ms": t1,
         "words": (s.analysis or {}).get("words", []),
     }
 
@@ -92,7 +97,7 @@ def _sentence_payload(session: Session, s: Sentence) -> dict:
 def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_session)):
     """Due items, oldest first. Saved items without a review_state row are
     due immediately (rung 0) — saving enrolls implicitly."""
-    limit = min(limit, SESSION_CAP)
+    limit = max(1, min(limit, SESSION_CAP))
     states = {rs.saved_item_id: rs for rs in session.scalars(select(ReviewState))}
     saved = session.scalars(
         select(SavedItem).where(SavedItem.archived.is_(False)).order_by(SavedItem.created_at)
@@ -119,6 +124,18 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
             live = next((c.sentence_id for c in item.contexts if c.sentence_id), None)
             context = session.get(Sentence, live) if live else None
             mode = "listen"
+        payload = _sentence_payload(session, context) if context else None
+        if payload is None:
+            snap = next((c.snapshot for c in item.contexts if (c.snapshot or {}).get("zh")), None)
+            if snap:
+                payload = {"sentence_id": None, "item_id": snap.get("item_id"),
+                           "item_kind": None, "item_available": False, "stream_url": None,
+                           "zh": snap["zh"], "en": snap.get("en"),
+                           "t0_ms": snap.get("t0_ms", 0), "t1_ms": snap.get("t1_ms", 0),
+                           "words": []}
+        lex = session.get(Lexeme, item.lexeme_id) if item.lexeme_id else None
+        senses = session.scalars(select(Sense).where(Sense.lexeme_id == item.lexeme_id)
+                                 .order_by(Sense.ord).limit(4)).all() if lex else []
         out.append({
             "saved_item_id": item.id,
             "kind": item.kind,
@@ -127,7 +144,9 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
             "mode": mode,
             "rung": rs.rung if rs else 0,
             "streak": rs.streak if rs else 0,
-            "context": _sentence_payload(session, context) if context else None,
+            "context": payload,
+            "answer": {"pinyin": lex.pinyin if lex else None,
+                       "senses": [{"py": sense.pinyin, "defs": sense.glosses} for sense in senses]},
         })
     return {"due": len(due), "items": out}
 
@@ -135,6 +154,7 @@ def review_queue(limit: int = SESSION_CAP, session: Session = Depends(get_sessio
 class OutcomeIn(BaseModel):
     result: str  # 'pass' | 'fail'
     mode: str | None = None
+    request_uuid: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/review/{saved_item_id}/outcome")
@@ -144,24 +164,40 @@ def review_outcome(saved_item_id: int, body: OutcomeIn, session: Session = Depen
     item = session.get(SavedItem, saved_item_id)
     if item is None:
         raise HTTPException(404)
-    rs = session.get(ReviewState, saved_item_id)
-    if rs is None:
-        rs = ReviewState(saved_item_id=saved_item_id, rung=0, passes=0, fails=0,
-                         streak=0, graduated=False)
-        session.add(rs)
-
     now = _now()
+    event_uuid = f"review:{saved_item_id}:{body.request_uuid}" if body.request_uuid else None
+    # The write obtains SQLite's writer lock before the eligibility check.
+    # Concurrent tabs cannot both advance the same due item.
+    session.execute(sqlite_insert(ReviewState).values(
+        saved_item_id=saved_item_id, rung=0, passes=0, fails=0, streak=0,
+        graduated=False, due_at=now, updated_at=now,
+    ).on_conflict_do_nothing(index_elements=["saved_item_id"]))
+    if event_uuid:
+        previous = session.scalar(select(Event).where(Event.client_uuid == event_uuid))
+        if previous is not None:
+            outcome = previous.data["outcome"]
+            session.rollback()
+            return outcome
+    if item.archived:
+        session.rollback()
+        raise HTTPException(409, "This item is archived. Refresh the review queue.")
+    claimed = session.execute(update(ReviewState).where(
+        ReviewState.saved_item_id == saved_item_id,
+        ReviewState.due_at <= now, ReviewState.graduated.is_(False),
+    ).values(updated_at=now)).rowcount
+    if not claimed:
+        session.rollback()
+        raise HTTPException(409, "This review has already been completed or is not due yet.")
+    rs = session.get(ReviewState, saved_item_id, populate_existing=True)
     if body.result == "pass":
         rs.passes += 1
         rs.streak += 1
-        if rs.rung >= len(LADDER_DAYS) - 1 and rs.passes >= 3:
-            # durable enough to leave the funnel: >=3 spaced successes ending
-            # at the top rung (the old streak>=2 shortcut graduated items
-            # after ~2 days — too shallow for the spacing effect)
+        if rs.streak > len(LADDER_DAYS):
+            # Initial practice followed by successful 1d, 3d, and 7d reviews.
             rs.graduated = True
             _mark_known_on_graduation(session, item)
-        elif rs.rung < len(LADDER_DAYS) - 1:
-            rs.rung += 1
+        else:
+            rs.rung = min(rs.streak - 1, len(LADDER_DAYS) - 1)
     else:
         rs.fails += 1
         rs.streak = 0
@@ -169,20 +205,23 @@ def review_outcome(saved_item_id: int, body: OutcomeIn, session: Session = Depen
     rs.due_at = now + timedelta(days=LADDER_DAYS[min(rs.rung, len(LADDER_DAYS) - 1)])
     rs.updated_at = now
 
-    session.add(Event(
-        type="review_outcome", lexeme_id=item.lexeme_id, study_mode=body.mode or "review",
-        data={"saved_item_id": saved_item_id, "result": body.result, "rung": rs.rung},
-    ))
-    session.commit()
-
     exported = session.scalar(
         select(AnkiLink.note_id).where(AnkiLink.saved_item_id == saved_item_id)
     )
     suggest_drop = rs.fails >= 3 and rs.rung == 0
-    return {
+    outcome = {
+        "result": body.result,
         "rung": rs.rung,
         "graduated": rs.graduated,
         "already_in_anki": exported is not None,
         "suggest_drop": suggest_drop,
         "next_due_days": LADDER_DAYS[min(rs.rung, len(LADDER_DAYS) - 1)],
     }
+    session.add(Event(
+        type="review_outcome", lexeme_id=item.lexeme_id, study_mode=body.mode or "review",
+        client_uuid=event_uuid,
+        data={"saved_item_id": saved_item_id, "result": body.result,
+              "rung": rs.rung, "outcome": outcome},
+    ))
+    session.commit()
+    return outcome

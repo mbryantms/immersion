@@ -118,17 +118,28 @@ def test_sentence_items_review_as_listen(client, db_session, seeded):
     assert entry["context"]["sentence_id"] == seeded["saved_sentence_id"]
 
 
-def test_ladder_pass_fail_and_graduation(client, seeded):
+def test_ladder_pass_fail_and_graduation(client, seeded, monkeypatch):
+    from app.api import review
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(review, "_now", lambda: now)
     sid = seeded["saved_id"]
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
-    assert r["rung"] == 1 and not r["graduated"] and r["next_due_days"] == 3
+    assert r["rung"] == 0 and not r["graduated"] and r["next_due_days"] == 1
+    now += timedelta(days=1)
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "fail"}).json()
     assert r["rung"] == 0 and r["next_due_days"] == 1
+    now += timedelta(days=1)
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
+    now += timedelta(days=1)
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
-    assert r["rung"] == 2 and not r["graduated"]  # 3 passes but only just at top
+    assert r["rung"] == 1 and not r["graduated"]
+    now += timedelta(days=3)
     r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
-    assert r["graduated"]  # >=3 passes ending at the top rung -> export tray
+    assert r["rung"] == 2 and not r["graduated"]
+    now += timedelta(days=7)
+    r = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
+    assert r["graduated"]
     # graduated items leave the queue
     assert client.get("/api/review/queue").json()["due"] == 0
 

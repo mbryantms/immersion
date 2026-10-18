@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import AnkiLink, Lexeme, MediaItem, MediaRoot, SavedItem, Sentence, Setting
+from ..timing import effective_times
 from .connect import AnkiError, ac
 
 NOTE_TYPE = "Xiehanzi Mandarin"
@@ -78,6 +79,7 @@ def _fields(session: Session, item: SavedItem) -> tuple[dict, dict]:
         meaning = en
 
     media_item = session.get(MediaItem, sentence.item_id) if sentence else None
+    t0, t1 = effective_times(session, sentence) if sentence else (0, 0)
     return (
         {
             "ID": _note_id(simplified),
@@ -92,7 +94,7 @@ def _fields(session: Session, item: SavedItem) -> tuple[dict, dict]:
         },
         {
             "sentence_id": sentence.id if sentence else None,
-            "can_clip": bool(sentence and media_item and media_item.available and sentence.t1_ms > sentence.t0_ms),
+            "can_clip": bool(sentence and media_item and media_item.available and t1 > t0),
             "can_image": bool(media_item and media_item.kind == "video" and media_item.available),
         },
     )
@@ -210,12 +212,13 @@ def export_items(session: Session, entries: list[dict], progress=lambda msg: Non
         if entry.get("include_media", True) and sentence is not None:
             src = _media_source(session, sentence)
             stem = f"immersion-{item.id}"
-            if src is not None and sentence.t1_ms > sentence.t0_ms:
+            t0, t1 = effective_times(session, sentence)
+            if src is not None and t1 > t0:
                 if "SentenceAudio" in model_fields:
-                    fields["SentenceAudio"] = _store(f"{stem}-sentence.mp3", _clip(src, sentence.t0_ms, sentence.t1_ms))
+                    fields["SentenceAudio"] = _store(f"{stem}-sentence.mp3", _clip(src, t0, t1))
                 media_item = session.get(MediaItem, sentence.item_id)
                 if image_field and media_item and media_item.kind == "video":
-                    mid = (sentence.t0_ms + sentence.t1_ms) // 2
+                    mid = (t0 + t1) // 2
                     data = _frame(src, mid)
                     ac("storeMediaFile", filename=f"{stem}-frame.jpg", data=base64.b64encode(data).decode())
                     fields[image_field] = f'<img src="{stem}-frame.jpg">'

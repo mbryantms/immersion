@@ -55,7 +55,14 @@ export default function App() {
   useEffect(() => {
     const stack = (ZH_FONTS[zhFont] ?? ZH_FONTS.sans).stack;
     document.documentElement.style.setProperty("--font-zh", stack);
-    void updateHaltSupport(stack);
+    let current = true;
+    const loadFont = zhFont === "serif"
+      ? Promise.all([import("@fontsource/noto-serif-sc/400.css"), import("@fontsource/noto-serif-sc/700.css")])
+      : zhFont === "wenkai" || zhFont === "kai"
+        ? Promise.all([import("@fontsource/lxgw-wenkai/500.css"), import("@fontsource/lxgw-wenkai/700.css")])
+        : Promise.resolve();
+    void loadFont.catch(() => {}).then(() => { if (current) void updateHaltSupport(stack); });
+    return () => { current = false; };
   }, [zhFont]);
 
   return (
@@ -68,6 +75,7 @@ export default function App() {
         toastOptions={{ style: { background: "#18201d", border: "1px solid rgb(255 255 255 / 0.1)", color: "#e7e5e4" } }}
       />
       <div className="min-h-screen pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
+        <a href="#main-content" className="skip-link">Skip to content</a>
         <header className="sticky top-0 z-40 h-[53px] border-b border-border/70 bg-background/82 px-3 backdrop-blur-xl supports-[backdrop-filter]:bg-background/72 sm:px-5">
           <div className="mx-auto flex h-full max-w-[1680px] items-center">
             <NavLink to="/" className="mr-5 flex items-center gap-2.5" aria-label="Immersion home">
@@ -88,6 +96,7 @@ export default function App() {
           </div>
         </header>
 
+        <div id="main-content" tabIndex={-1}>
         <ErrorBoundary>
         <Suspense fallback={<LoadingPage />}>
           <Routes>
@@ -104,6 +113,7 @@ export default function App() {
           </Routes>
         </Suspense>
         </ErrorBoundary>
+        </div>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden" aria-label="Mobile navigation">
           <div className="mx-auto grid h-16 max-w-lg grid-cols-6 px-1.5">

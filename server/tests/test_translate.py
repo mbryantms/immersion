@@ -4,7 +4,7 @@ batches, and a retry resumes from the first untranslated sentence."""
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 
 from app.ai import tasks
@@ -17,6 +17,9 @@ from app.models import AiArtifact, Base, MediaItem, MediaRoot, Sentence, TextTra
 def db(tmp_path: Path):
     engine = make_engine(tmp_path / "test.db")
     Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE VIRTUAL TABLE sentence_fts USING fts5("
+                          "zh_words, zh_chars, trad_words, pinyin, en)"))
     return sessionmaker(engine, expire_on_commit=False)
 
 
@@ -35,6 +38,10 @@ def item_with_sentences(db):
         for i in range(60):  # 3 batches of 25, last partial
             s.add(Sentence(item_id=item.id, track_id=track.id, ordinal=i,
                            zh=f"第{i}句。", t0_ms=0, t1_ms=0))
+        s.flush()
+        from app.ingest.analysis import write_fts
+
+        write_fts(s, s.scalars(select(Sentence)).all())
         s.commit()
         return item.id
 
@@ -59,6 +66,8 @@ def test_batch_checkpoint_survives_failure(db, item_with_sentences, monkeypatch)
         done = s.scalars(select(Sentence).where(Sentence.en.is_not(None))).all()
         assert len(done) == 25  # batch 1 committed before batch 2 blew up
         assert all(d.en_source == "ai" for d in done)
+        assert len(s.execute(text("SELECT rowid FROM sentence_fts WHERE sentence_fts MATCH 'en'")).all()) == 25
+        assert s.get(MediaItem, item_with_sentences).meta["analysis_rev"] == 1
         assert s.scalar(select(AiArtifact.id).limit(1)) is not None
 
     # retry resumes: only the 35 untranslated go out

@@ -53,6 +53,7 @@ export const Token = memo(function Token({
       className={`w ${isName ? "nm" : `k-${state}`}${saved ? " saved" : ""}`}
       onClick={(e) => {
         e.stopPropagation();
+        e.currentTarget.focus({ preventScroll: true });
         onTap?.(word);
       }}
       onKeyDown={(e) => {

@@ -110,22 +110,31 @@ def test_lookup_event_demotes_derived(client, db_session, seeded):  # noqa: F811
         assert s.get(KnowledgeState, seeded["lexeme"]).state == "known"
 
 
-def test_graduation_needs_three_passes_and_marks_known(client, db_session, seeded):  # noqa: F811
+def test_graduation_needs_spaced_passes_and_marks_known(client, db_session, seeded, monkeypatch):  # noqa: F811
+    from app.api import review
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(review, "_now", lambda: now)
     saved = client.post("/api/saved-items", json={
         "kind": "word", "lexeme_id": seeded["lexeme"], "surface": "你好",
         "sentence_id": seeded["sentence"],
     }).json()
     sid = saved["id"]
-    with db_session() as s:  # place at top rung so passes are the only gate
+    with db_session() as s:  # a stale top rung cannot bypass spaced success evidence
         from app.models import ReviewState
 
-        s.add(ReviewState(saved_item_id=sid, rung=2, passes=0, fails=0, streak=0))
+        s.add(ReviewState(saved_item_id=sid, rung=2, passes=0, fails=0, streak=0, due_at=now))
         s.commit()
     r1 = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
+    now += timedelta(days=1)
     r2 = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
     assert not r1["graduated"] and not r2["graduated"]
+    now += timedelta(days=3)
     r3 = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
-    assert r3["graduated"]
+    assert not r3["graduated"]
+    now += timedelta(days=7)
+    r4 = client.post(f"/api/review/{sid}/outcome", json={"result": "pass"}).json()
+    assert r4["graduated"]
     with db_session() as s:
         ks = s.get(KnowledgeState, seeded["lexeme"])
         assert (ks.state, ks.source) == ("known", "derived")

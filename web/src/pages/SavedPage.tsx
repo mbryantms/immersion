@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FilterGroup, FilterOption } from "@/components/ui/filter-group";
 import { setKnowledge, useResetSavedReview, useResetSentencePlayed, useSaved, useUnsave } from "../api/queries";
 import type { SavedItemOut } from "../api/types";
 import ExportTray from "../saved/ExportTray";
@@ -69,9 +69,9 @@ export default function SavedPage() {
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={kind} onValueChange={(value) => { setKind(value as Kind); setSelected(new Set()); }}>
-          <TabsList><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="word">Words</TabsTrigger><TabsTrigger value="sentence">Sentences</TabsTrigger></TabsList>
-        </Tabs>
+        <FilterGroup type="single" aria-label="Filter saved items by type" value={kind} onValueChange={(value) => { if (value) setKind(value as Kind); setSelected(new Set()); }}>
+          <FilterOption value="all">All</FilterOption><FilterOption value="word">Words</FilterOption><FilterOption value="sentence">Sentences</FilterOption>
+        </FilterGroup>
         {!!items.length && <label className="flex items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={allSelected} onCheckedChange={(value) => setSelected(value === true ? new Set(items.map((item) => item.id)) : new Set())} />Select all {items.length}</label>}
       </div>
 

@@ -210,8 +210,8 @@ export interface ExportPreview {
 }
 
 export interface ReviewContext {
-  sentence_id: number;
-  item_id: number;
+  sentence_id: number | null;
+  item_id: number | null;
   item_kind: string | null;
   item_available: boolean;
   stream_url: string | null;
@@ -231,9 +231,11 @@ export interface ReviewItem {
   rung: number;
   streak: number;
   context: ReviewContext | null;
+  answer?: { pinyin: string | null; senses: { py: string | null; defs: string[] }[] };
 }
 
 export interface ReviewOutcome {
+  result?: "pass" | "fail";
   rung: number;
   graduated: boolean;
   already_in_anki: boolean;

@@ -1,11 +1,11 @@
 // Dictation LCS scoring — kept in sync with server/src/app/lingua/diff.py
 // (client-side for instant feedback; the server copy drives review scoring).
-// Only CJK characters count: punctuation and spacing aren't listening skill.
+// Names and numbers count; punctuation and spacing do not.
 
-const CJK = /[㐀-鿿]/;
+const CONTENT = /[\p{L}\p{N}]/u;
 
 export function normZh(text: string): string {
-  return [...text].filter((ch) => CJK.test(ch)).join("");
+  return [...text.normalize("NFKC").toLowerCase()].filter((ch) => CONTENT.test(ch)).join("");
 }
 
 export type DiffSegment =
@@ -14,7 +14,7 @@ export type DiffSegment =
   | { kind: "extra"; text: string }; // typed chars with no counterpart
 
 export interface DictationResult {
-  score: number; // matched / expected chars; 1 when nothing to hear
+  score: number; // 1 - edit distance / longer input
   segments: DiffSegment[];
 }
 
@@ -22,7 +22,9 @@ export const PASS_SCORE = 0.95;
 
 type Op = ["eq" | "del" | "ins", string];
 
-function lcsOps(a: string, b: string): Op[] {
+function lcsOps(aText: string, bText: string): Op[] {
+  const a = [...aText];
+  const b = [...bText];
   const n = a.length;
   const m = b.length;
   const table = new Uint16Array((n + 1) * (m + 1));
@@ -59,16 +61,12 @@ function lcsOps(a: string, b: string): Op[] {
 export function scoreAttempt(expectedZh: string, typed: string): DictationResult {
   const expected = normZh(expectedZh);
   const typedN = normZh(typed);
-  if (!expected) return { score: 1, segments: [] };
-
   const ops = lcsOps(expected, typedN);
   const segments: DiffSegment[] = [];
-  let ok = 0;
   let idx = 0;
   while (idx < ops.length) {
     const [op, ch] = ops[idx];
     if (op === "eq") {
-      ok++;
       const last = segments[segments.length - 1];
       if (last?.kind === "ok") last.text += ch;
       else segments.push({ kind: "ok", text: ch });
@@ -86,5 +84,16 @@ export function scoreAttempt(expectedZh: string, typed: string): DictationResult
     if (dels) segments.push({ kind: "miss", expected: dels, got: inss });
     else segments.push({ kind: "extra", text: inss });
   }
-  return { score: ok / expected.length, segments };
+  const a = [...expected];
+  const b = [...typedN];
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row.push(Math.min(row[j - 1] + 1, previous[j] + 1, previous[j - 1] + Number(a[i - 1] !== b[j - 1])));
+    }
+    previous = row;
+  }
+  const length = Math.max(a.length, b.length);
+  return { score: length ? (length - previous[b.length]) / length : 1, segments };
 }

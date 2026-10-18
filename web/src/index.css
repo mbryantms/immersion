@@ -2,11 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
-/* selectable zh fonts (unicode-range subsets: only used glyphs download) */
-@import "@fontsource/lxgw-wenkai/index.css";
-@import "@fontsource/lxgw-wenkai/700.css";
-@import "@fontsource/noto-serif-sc/400.css";
-@import "@fontsource/noto-serif-sc/700.css";
+/* Optional Chinese font stylesheets are loaded only when selected in App. */
 
 @custom-variant dark (&:is(.dark *));
 
@@ -252,7 +248,7 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
   padding: 0 0.7rem;
   font-size: 0.75rem;
   font-weight: 500;
-  color: rgb(120 113 108);
+  color: rgb(168 162 158);
   transition: color 150ms ease, background-color 150ms ease;
 }
 
@@ -327,6 +323,20 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
 }
 .learning-toggle:hover { color: white; border-color: rgb(255 255 255 / 0.13); background: rgb(255 255 255 / 0.06); }
 .learning-toggle.is-active { color: rgb(153 246 228); border-color: rgb(45 212 191 / 0.22); background: rgb(45 212 191 / 0.1); }
+.learning-toggle:disabled { opacity: 0.5; cursor: default; }
+
+/* Shared keyboard affordances also cover custom player controls. */
+:where(button, a, input, summary, [role="button"]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+.skip-link { position: fixed; top: 0.75rem; left: 0.75rem; z-index: 100; transform: translateY(-200%); border-radius: 0.5rem; padding: 0.75rem 1rem; color: var(--primary-foreground); background: var(--primary); }
+.skip-link:focus { transform: translateY(0); }
+@media (pointer: coarse) {
+  .learning-toggle, .gloss-action, .gloss-action-primary, .follow-toggle { min-height: 44px; }
+  .control-button { min-height: 44px; min-width: 44px; }
+  [data-slot="button"] { min-height: 44px; min-width: 44px; }
+}
 
 .gloss-action,
 .gloss-action-primary {
@@ -388,7 +398,7 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
   border: 1px solid rgb(255 255 255 / 0.07);
   border-radius: 999px;
   padding: 0 0.55rem;
-  color: rgb(120 113 108);
+  color: rgb(168 162 158);
   font-size: 10px;
   font-weight: 600;
   transition: 140ms ease;
@@ -479,7 +489,7 @@ video::cue { visibility: hidden; } /* native cues never render; we own subtitles
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
 @theme inline {
