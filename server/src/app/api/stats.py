@@ -105,7 +105,7 @@ def dashboard(population: str = Query(default="library", pattern="^(library|enco
     graduated = session.scalar(
         select(func.count()).select_from(ReviewState)
         .join(SavedItem, SavedItem.id == ReviewState.saved_item_id)
-        .where(ReviewState.graduated.is_(True), SavedItem.archived.is_(False))
+        .where(ReviewState.graduated.is_(True), SavedItem.archived.is_(False), SavedItem.export_deferred.is_(False))
         .where(~select(1).select_from(AnkiLink)
                .where(AnkiLink.saved_item_id == SavedItem.id)
                .exists())

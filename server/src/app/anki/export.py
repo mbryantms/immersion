@@ -1,10 +1,9 @@
-"""Export mined items to Anki. Reuses the "Xiehanzi Mandarin" note type
-(templates/styling already render it) into a Mined::Immersion deck.
+"""Canonical export fields and bounded media builders.
 
-Two halves: build_preview is fast and side-effect-free (field building + dup
-detection across the whole collection) and runs in the API process; export
-committed items runs as a worker job because media generation (ffmpeg cue
-clips, frame grabs, edge-tts word audio) takes seconds per item."""
+The application's current API/worker handoff lives in profile.py and handoff.py.
+The older build_preview/export_items helpers remain for legacy regression
+coverage; current routes and job handlers never submit through that path.
+"""
 
 from __future__ import annotations
 
@@ -171,7 +170,7 @@ def _clip(src: Path, t0_ms: int, t1_ms: int) -> bytes:
         subprocess.run(
             ["ffmpeg", "-loglevel", "error", "-ss", f"{t0:.3f}", "-to", f"{t1:.3f}",
              "-i", str(src), "-vn", "-c:a", "libmp3lame", "-b:a", "96k", "-y", f.name],
-            check=True,
+            check=True, timeout=90,
         )
         return Path(f.name).read_bytes()
 
@@ -181,7 +180,7 @@ def _frame(src: Path, t_ms: int) -> bytes:
         subprocess.run(
             ["ffmpeg", "-loglevel", "error", "-ss", f"{t_ms / 1000:.3f}", "-i", str(src),
              "-frames:v", "1", "-vf", "scale=640:-2", "-y", f.name],
-            check=True,
+            check=True, timeout=90,
         )
         return Path(f.name).read_bytes()
 
@@ -196,7 +195,7 @@ def _tts(word: str) -> bytes:
                 chunks.append(chunk["data"])
         return b"".join(chunks)
 
-    return asyncio.run(run())
+    return asyncio.run(asyncio.wait_for(run(), timeout=20))
 
 
 def _store(filename: str, data: bytes) -> str:

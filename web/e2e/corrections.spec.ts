@@ -35,7 +35,7 @@ test("corrections save, reset, restore, refresh the transcript, and preserve foc
   await expect(page.getByRole("textbox", { name: "English meaning" })).toHaveValue("My contextual translation.");
   expect(requests.map((body) => body.expected_revision)).toEqual([0, 1, 2]);
   const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
-  expect(accessibility.violations.map((item) => item.id)).toEqual([]);
+  expect(accessibility.violations.map((item) => ({ id: item.id, details: item.nodes.map((node) => node.failureSummary) }))).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("correction-editor-mobile.png"), fullPage: true });

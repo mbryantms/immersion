@@ -65,7 +65,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent className="relative flex flex-wrap items-center gap-2 pt-2">
             {stats?.review_due ? <Button asChild><Link to="/review">Start a 3–10 minute review<ArrowRight /></Link></Button> : <Button disabled>No review due</Button>}
-            {!!stats?.graduated_waiting && <Button asChild variant="ghost"><Link to="/saved">{stats.graduated_waiting} ready for Anki</Link></Button>}
+            {!!stats?.graduated_waiting && <Button asChild variant="ghost"><Link to="/exports">{stats.graduated_waiting} awaiting Anki handoff</Link></Button>}
           </CardContent>
         </Card>
 
@@ -201,7 +201,7 @@ export default function HomePage() {
           <p className="text-sm font-medium">Anki bridge</p>
           <p className="text-xs text-muted-foreground">{stats?.anki.last_import ? `Anki vocabulary last synchronized ${String((stats.anki.last_import as { at?: string })?.at ?? "").slice(0, 10)}` : "Open Anki Desktop, then import known words from Admin."}</p>
         </div>
-        <Button asChild variant="outline" size="sm"><Link to="/saved">Review export queue</Link></Button>
+        <Button asChild variant="outline" size="sm"><Link to="/exports">Review export queue</Link></Button>
       </Card>
     </Page>
   );

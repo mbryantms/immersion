@@ -15,7 +15,7 @@ router = APIRouter()
 
 ALLOWED = {"repair_media", "scan_all", "scan_root", "ingest_item", "anki_import_known",
            "whisper_align", "whisper_transcribe", "remux_item",
-           "translate_item", "anki_export", "fts_backfill", "derive_knowledge",
+           "translate_item", "fts_backfill", "derive_knowledge",
            "reanalyze_item", "reanalyze_all"}
 
 

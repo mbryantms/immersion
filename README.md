@@ -75,3 +75,5 @@ Learner evidence, optional preferences, recommendation estimates, and migration 
 Guided scenes, offline Mandarin construction practice, selective mining and suspension: [guided learning delivery](docs/GUIDED_LEARNING.md).
 
 Browser-only voice comparison, storage/recovery and optional AI controls: [shadowing and AI delivery](docs/SHADOWING_AI.md). Recording needs localhost or HTTPS; the plain HTTP hostname serving configuration needs a secure origin before the browser will grant microphone access.
+
+Configurable Anki destinations, preflight, a persistent export inbox, lost-response recovery and query performance: [retention handoff delivery](docs/RETENTION_HANDOFF.md).

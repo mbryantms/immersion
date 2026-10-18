@@ -26,7 +26,10 @@ export const test = base.extend({
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname.replace("/api", "");
       let payload: unknown = {};
-      if (path === "/ai-policy") payload = { enabled: true, prefetch: false, provider_available: false };
+      if (path === "/anki/export-profile") payload = { profile: { deck: "Mined::Immersion", model: "Xiehanzi Mandarin", fields: { ID: "ID", Simplified: "Simplified", Pinyin: "Pinyin", Meaning: "Meaning", Sentence: "Sentence", SentenceMeaning: "SentenceMeaning" }, templates_reviewed: false, word_tts: false }, profile_hash: "a".repeat(64) };
+      else if (path === "/anki/inbox") payload = { counts: { ready: 0, deferred: 0 }, items: [], next_cursor: null };
+      else if (path === "/anki/exports") payload = { batches: [] };
+      else if (path === "/ai-policy") payload = { enabled: true, prefetch: false, provider_available: false };
       else if (path === "/scenes") payload = { items: [] };
       else if (path === "/constructions") payload = { version: "test", items: [] };
       else if (path === "/mining/budget") payload = { daily_word_budget: 5, used: 0, remaining: 5, timezone: "UTC", soft_limit: true };

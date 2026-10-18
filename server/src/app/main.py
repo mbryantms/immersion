@@ -15,6 +15,7 @@ from .api import (
     corrections,
     app_settings,
     events,
+    exports,
     jobs,
     knowledge,
     library,
@@ -48,6 +49,7 @@ app.add_middleware(
 for module in (
     ai,
     corrections,
+    exports,
     library,
     sentences,
     knowledge,

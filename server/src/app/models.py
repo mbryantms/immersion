@@ -233,13 +233,14 @@ class SavedItem(Base):
     surface: Mapped[str | None] = mapped_column(String)  # as saved (custom spans differ from lexeme)
     selected_reading: Mapped[str | None] = mapped_column(String)
     selected_meaning: Mapped[str | None] = mapped_column(Text)
+    export_deferred: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     selection_source: Mapped[str | None] = mapped_column(String)
     note: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSON)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     contexts: Mapped[list[SavedContext]] = relationship(back_populates="saved_item")
-    __table_args__ = (Index("ix_saved_lexeme", "lexeme_id"),)
+    __table_args__ = (Index("ix_saved_lexeme", "lexeme_id"), Index("ix_saved_export_inbox", "archived", "export_deferred", "id"))
 
 
 class SavedContext(Base):
@@ -271,7 +272,7 @@ class ReviewState(Base):
     streak: Mapped[int] = mapped_column(Integer, default=0)  # consecutive passes
     graduated: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    __table_args__ = (Index("ix_review_due", "due_at"),)
+    __table_args__ = (Index("ix_review_due", "due_at"), Index("ix_review_graduated_saved", "graduated", "saved_item_id"))
 
 
 class Event(Base):
@@ -315,6 +316,7 @@ class AnkiLink(Base):
     fields_hash: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="exported")
     exported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_anki_link_saved", "saved_item_id"),)
 
 
 class AnkiSentence(Base):
@@ -428,3 +430,22 @@ class SceneQuestion(Base):
     body: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (Index("ix_scene_question_scene", "scene_id"),)
+
+
+class ExportAttempt(Base):
+    """Immutable submitted fields/destination, with recoverable per-note delivery state."""
+    __tablename__ = "export_attempt"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("job.id"))
+    saved_item_id: Mapped[int | None] = mapped_column(ForeignKey("saved_item.id", ondelete="SET NULL"))
+    original_saved_item_id: Mapped[int] = mapped_column(Integer)
+    export_key: Mapped[str] = mapped_column(String)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String, default="queued")
+    note_id: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_export_attempt_saved", "saved_item_id", "id"),
+                     Index("ix_export_attempt_job", "job_id"))

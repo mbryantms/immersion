@@ -133,6 +133,7 @@ export default function ReviewPage() {
             <h1 className="mt-5 text-2xl font-semibold">{position ? "Session complete" : "Nothing due right now"}</h1>
             <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">{position ? `You reviewed ${position} items: ${passed} recalled and ${position - passed} to practise again. Return to your listening and reading while those memories settle.` : "Your queue is clear. Save useful words or sentences as you explore your library."}</p>
             {graduatedIds.length > 0 && <Button className="mt-5" onClick={() => setTrayIds(graduatedIds)}><Send />Export {graduatedIds.length} to Anki</Button>}
+            <Button asChild variant="outline" className="mt-3"><Link to="/exports">Open persistent export inbox</Link></Button>
             <Button asChild variant="ghost" className="mt-3"><Link to="/"><ArrowLeft />Back home</Link></Button>
           </CardContent>
         </Card>

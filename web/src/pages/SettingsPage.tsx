@@ -1,3 +1,4 @@
+import AnkiSettingsCard from "../components/AnkiSettingsCard";
 import AISettingsCard from "../components/AISettingsCard";
 import MiningBudgetCard from "../components/MiningBudgetCard";
 import LearnerProfileCard from "../components/LearnerProfileCard";
@@ -64,6 +65,7 @@ export default function SettingsPage() {
           <LearnerProfileCard />
           <MiningBudgetCard />
           <AISettingsCard />
+          <AnkiSettingsCard />
           <Card>
             <CardHeader><div className="flex items-center gap-2"><Palette className="size-4 text-primary" /><CardTitle className="text-base">Reading and subtitles</CardTitle></div><CardDescription>Typography and annotation choices for Mandarin text</CardDescription></CardHeader>
             <CardContent className="space-y-0 pt-2">

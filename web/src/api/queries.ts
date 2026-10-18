@@ -228,13 +228,13 @@ export const fetchExportPreview = (savedItemIds: number[]) =>
 
 export interface ExportEntry {
   saved_item_id: number;
-  fields: Record<string, string>;
+  source_hash: string;
+  meaning: string;
   allow_duplicate?: boolean;
   include_media?: boolean;
 }
-
-export const startExport = (entries: ExportEntry[]) =>
-  post<{ queued: boolean; job_id: number | null }>("/anki/export", { entries });
+export const startExport = (entries: ExportEntry[], profileHash: string, requestUuid: string) =>
+  post<{ queued: boolean; job_id: number; replayed?: boolean }>("/anki/export", { entries, profile_hash: profileHash, request_uuid: requestUuid });
 
 /** Poll one job to completion; resolves with the finished job. */
 export async function awaitJob(jobId: number, timeoutMs = 180_000): Promise<JobOut> {

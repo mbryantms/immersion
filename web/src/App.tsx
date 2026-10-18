@@ -25,6 +25,7 @@ const HomePage = lazy(() => import("./pages/HomePage"));
 const JobsPage = lazy(() => import("./pages/JobsPage"));
 const LibraryPage = lazy(() => import("./pages/LibraryPage"));
 const ReviewPage = lazy(() => import("./pages/ReviewPage"));
+const ExportPage = lazy(() => import("./pages/ExportPage"));
 const SavedPage = lazy(() => import("./pages/SavedPage"));
 const SearchPage = lazy(() => import("./pages/SearchPage"));
 const SeriesPage = lazy(() => import("./pages/SeriesPage"));
@@ -43,7 +44,7 @@ const primaryNav: NavItem[] = [
   { to: "/", label: "Home", icon: Home },
   { to: "/library", label: "Library", icon: BookOpen, matches: ["/series/", "/watch/", "/scenes/", "/practice"] },
   { to: "/review", label: "Review", icon: ChartNoAxesColumnIncreasing },
-  { to: "/saved", label: "Saved", icon: Bookmark },
+  { to: "/saved", label: "Saved", icon: Bookmark, matches: ["/exports"] },
   { to: "/search", label: "Search", icon: Search, matches: ["/word/"] },
 ];
 
@@ -108,6 +109,7 @@ export default function App() {
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/series/:id" element={<SeriesPage />} />
             <Route path="/watch/:id" element={<WatchPage />} />
+            <Route path="/exports" element={<ExportPage />} />
             <Route path="/saved" element={<SavedPage />} />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/search" element={<SearchPage />} />

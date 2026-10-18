@@ -219,9 +219,13 @@ export interface ExportPreviewItem {
   duplicates: number;
   duplicate_meanings: string[];
   already_exported: number | null;
+  source_hash: string;
+  errors: string[];
 }
 
 export interface ExportPreview {
+  profile_hash: string;
+  preflight: import("../anki-types").AnkiPreflight;
   deck: string;
   model: string;
   items: ExportPreviewItem[];

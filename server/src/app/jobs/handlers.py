@@ -119,9 +119,11 @@ def anki_import_known(session: Session, payload: dict, progress) -> dict:
 
 @handler("anki_export")
 def anki_export(session: Session, payload: dict, progress) -> dict:
-    from ..anki.export import export_items
+    from ..anki.handoff import run_attempts
 
-    return export_items(session, payload["entries"], progress)
+    if "export_ids" not in payload:
+        raise RuntimeError("Legacy export requires a fresh preview in the export inbox")
+    return run_attempts(session, payload["export_ids"], progress)
 
 
 @handler("fts_backfill")

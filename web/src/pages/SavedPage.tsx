@@ -69,7 +69,7 @@ export default function SavedPage() {
         eyebrow="Learning queue"
         title="Saved words and sentences"
         description="Keep useful context close, review it briefly, then prepare selected cards for Anki."
-        actions={<Button asChild variant="outline"><Link to="/review"><ArrowUpRight />Start review</Link></Button>}
+        actions={<><Button asChild variant="outline"><Link to="/exports">Export inbox</Link></Button><Button asChild variant="outline"><Link to="/review"><ArrowUpRight />Start review</Link></Button></>}
       />
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Learning queue status"><Button ref={activeFilter} className="min-h-11" variant={suspended ? "outline" : "default"} aria-pressed={!suspended} onClick={() => { setSuspended(false); setSelected(new Set()); }}>Active cards</Button><Button ref={suspendedFilter} className="min-h-11" variant={suspended ? "default" : "outline"} aria-pressed={suspended} onClick={() => { setSuspended(true); setSelected(new Set()); }}>Suspended cards</Button></div>
@@ -82,6 +82,7 @@ export default function SavedPage() {
         {!!items.length && <label className="flex items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={allSelected} onCheckedChange={(value) => setSelected(value === true ? new Set(items.map((item) => item.id)) : new Set())} />Select all {items.length}</label>}
       </div>
 
+      {selected.size > 50 && <p role="status" className="text-sm text-amber-200">Select up to 50 cards per export.</p>}
       {selected.size > 0 && (
         <Card className="sticky top-[61px] z-30 border-primary/20 bg-popover/95 shadow-xl backdrop-blur-xl">
           <CardContent className="flex flex-wrap items-center gap-2 py-3">
@@ -90,7 +91,7 @@ export default function SavedPage() {
             <Button size="sm" variant="ghost" disabled={!hasSelectedWords} onClick={() => void bulkKnowledge("known")}><Check />Mark known</Button>
             <Button size="sm" variant="ghost" disabled={!hasSelectedWords} onClick={() => void bulkKnowledge("ignored")}><Tags />Ignore</Button>
             <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void bulkRemove()}><ArchiveX />Remove</Button>
-            <Button size="sm" disabled={suspended} onClick={() => setTrayIds([...selected])}><Send />Export to Anki</Button>
+            <Button size="sm" disabled={suspended || selected.size > 50} onClick={() => setTrayIds([...selected])}><Send />Export to Anki</Button>
           </CardContent>
         </Card>
       )}
