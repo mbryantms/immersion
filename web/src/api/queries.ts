@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { del, get, patch, post, put } from "./client";
+import { api, del, get, patch, post, put } from "./client";
 import type {
   ExportPreview,
   ItemDetail,
@@ -257,21 +257,27 @@ export const clearKnowledge = (lexemeId: number) =>
 export const resetLexemeStats = (lexemeId: number) =>
   del<{ lexeme_id: number; reset: boolean }>(`/lexemes/${lexemeId}/stats`);
 
-export const explainSentence = (sentenceId: number) =>
-  post<import("./types").ExplainCore>(`/sentences/${sentenceId}/explain`);
-
-export const explainSentenceExtras = (sentenceId: number) =>
-  post<import("./types").ExplainExtras>(`/sentences/${sentenceId}/explain-extras`);
-
-/** Fire-and-forget warmup: start generating the explanation so a later
- *  Explain click lands on the cache (or joins the in-flight call). Core
- *  first, extras chained after — parallel calls share one provider token
- *  budget and finish later than back-to-back. */
-export const prefetchExplain = (sentenceId: number) => {
-  explainSentence(sentenceId)
-    .catch(() => {})
-    .finally(() => explainSentenceExtras(sentenceId).catch(() => {}));
-};
+interface ExplainOptions { signal?: AbortSignal; prefetch?: boolean }
+async function explanation<T>(sentenceId: number, endpoint: string, options: ExplainOptions = {}): Promise<T> {
+  const requestId = crypto.randomUUID();
+  let cancelled = false;
+  const cancel = () => { if (!cancelled) { cancelled = true; void api(`/ai-requests/${requestId}`, { method: "DELETE", keepalive: true }).catch(() => {}); } };
+  if (options.signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  window.addEventListener("pagehide", cancel, { once: true });
+  try {
+    return await api<T>(`/sentences/${sentenceId}/${endpoint}?request_id=${requestId}&prefetch=${!!options.prefetch}`, { method: "POST", signal: options.signal });
+  } catch (error) { cancel(); throw error; }
+  finally { options.signal?.removeEventListener("abort", cancel); window.removeEventListener("pagehide", cancel); }
+}
+export const explainSentence = (sentenceId: number, options?: ExplainOptions) =>
+  explanation<import("./types").ExplainCore>(sentenceId, "explain", options);
+export const explainSentenceExtras = (sentenceId: number, options?: ExplainOptions) =>
+  explanation<import("./types").ExplainExtras>(sentenceId, "explain-extras", options);
+export const prefetchExplain = (sentenceId: number, signal: AbortSignal) =>
+  explainSentence(sentenceId, { signal, prefetch: true }).catch(() => {});
+export interface AIPolicy { enabled: boolean; prefetch: boolean; provider_available: boolean }
+export const useAIPolicy = () => useQuery({ queryKey: ["ai-policy"], queryFn: () => get<AIPolicy>("/ai-policy") });
 
 export const patchTrackOffset = (trackId: number, offsetMs: number) =>
   patch<{ id: number; offset_ms: number }>(`/tracks/${trackId}`, { offset_ms: offsetMs });

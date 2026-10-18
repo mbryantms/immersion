@@ -2,7 +2,7 @@
 
 Local Mandarin reading and listening practice with videos and podcasts,
 interactive subtitles, contextual dictionary/vocabulary tools, guided scenes,
-construction exercises, learner evidence, and an Anki bridge. The roadmap below
+construction exercises, local shadowing recordings, learner evidence, and an Anki bridge. The roadmap below
 tracks delivered features and remaining learning-quality work.
 
 ## Layout
@@ -73,3 +73,5 @@ Source selection, correction history, playback repair, and migration details: [s
 Learner evidence, optional preferences, recommendation estimates, and migration policy: [learner evidence delivery](docs/LEARNER_EVIDENCE.md).
 
 Guided scenes, offline Mandarin construction practice, selective mining and suspension: [guided learning delivery](docs/GUIDED_LEARNING.md).
+
+Browser-only voice comparison, storage/recovery and optional AI controls: [shadowing and AI delivery](docs/SHADOWING_AI.md). Recording needs localhost or HTTPS; the plain HTTP hostname serving configuration needs a secure origin before the browser will grant microphone access.

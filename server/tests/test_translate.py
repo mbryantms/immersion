@@ -82,7 +82,7 @@ def test_count_mismatch_raises(db, item_with_sentences, monkeypatch):
     monkeypatch.setattr(tasks.provider, "available", lambda: True)
     monkeypatch.setattr(tasks.provider, "complete_json", lambda p, timeout_s=600: ["one"])
     with db() as s:
-        with pytest.raises(RuntimeError, match="count mismatch"):
+        with pytest.raises(RuntimeError, match="one nonblank string per sentence"):
             translate_item(s, item_with_sentences)
 
 

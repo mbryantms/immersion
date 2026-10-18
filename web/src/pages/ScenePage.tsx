@@ -9,6 +9,8 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
+import { voiceKey } from "../guided/recordings";
+import ShadowingRecorder from "../guided/ShadowingRecorder";
 import QuestionEditor from "../guided/QuestionEditor";
 import SceneVocabulary from "../guided/SceneVocabulary";
 import { track, uuid } from "../lib/events";
@@ -71,6 +73,7 @@ export default function ScenePage() {
         {showEnglish && !showChinese && <div className="space-y-2">{scene.snapshot.lines.map((line) => line.en && <p key={line.id} lang="en" className="text-sm text-muted-foreground">{line.en}</p>)}</div>}
       </CardContent></Card>
       {scene.stage === "watch" && <p className="text-sm leading-relaxed text-muted-foreground">Watch or listen for the overall situation. This is a self-paced study cycle; moving to the next step does not certify that you understood it.</p>}
+      {(scene.stage === "watch" || scene.stage === "clarify") && <ShadowingRecorder key={voiceKey(scene)} scene={scene} pauseSource={() => media.current?.pause()} replaySource={() => { const element = media.current; if (!element || busy) return; element.currentTime = scene.snapshot.t0/1000; void element.play().catch(() => setMediaError(true)); act("hint", { kind: "replay" }); }} />}
       {scene.stage === "clarify" && <SceneVocabulary sceneId={scene.id} />}
       {scene.stage === "reduce" && <p className="text-sm leading-relaxed text-muted-foreground">{scene.goal === "listen" ? "Listen again without the transcript." : "Read again without the English translation."} Try to state what happened and who did what. Use a deliberate hint when needed; assistance is retained with the result.</p>}
       {scene.stage === "check" && <Card><CardHeader><CardTitle className="text-base">Check the meaning you formed</CardTitle></CardHeader><CardContent className="space-y-4">

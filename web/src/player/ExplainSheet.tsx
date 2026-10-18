@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import ArtifactFeedback from "./ArtifactFeedback";
+import { ApiError } from "../api/client";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -18,34 +21,35 @@ interface Props {
   onClose: () => void;
 }
 
-/** On-demand deep dive into one sentence. Pinyin, HSK levels, POS, and
- *  dictionary glosses come from the app's own analysis/lexicon; the AI layer
- *  (grounded on that tokenization) adds translations, structure, particle
- *  logic, pronunciation notes, register variations, pattern examples, and
- *  pitfalls. The two halves generate in parallel server-side — core renders
- *  as soon as it lands, extras fill in below. Provenance always shown. */
+/** Explicit, cancellable AI assistance. Dictionary facts remain separate. */
 export default function ExplainSheet({ sentence, onClose }: Props) {
   const [result, setResult] = useState<ExplainCore | null>(null);
   const [extras, setExtras] = useState<ExplainExtras | null>(null);
-  const [extrasFailed, setExtrasFailed] = useState(false);
+  const [extrasLoading, setExtrasLoading] = useState(false);
+  const [extrasError, setExtrasError] = useState<Error | null>(null);
+  const [failure, setFailure] = useState<Error | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const controller = useRef<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    // core first, extras chained after: one provider token budget, so
-    // back-to-back beats parallel and core is what the user reads first
-    explainSentence(sentence.id)
-      .then((r) => !cancelled && setResult(r))
-      .catch((e: Error) => !cancelled && setError(e.message))
-      .finally(() => {
-        explainSentenceExtras(sentence.id)
-          .then((r) => !cancelled && setExtras(r))
-          .catch(() => !cancelled && setExtrasFailed(true));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sentence.id]);
+    const next = new AbortController(); controller.current = next;
+    setResult(null); setExtras(null); setError(null); setFailure(null); setExtrasError(null); setExtrasLoading(false);
+    explainSentence(sentence.id, { signal: next.signal })
+      .then((value) => { if (!next.signal.aborted) setResult(value); })
+      .catch((value: Error) => { if (!next.signal.aborted) { setFailure(value); setError(value instanceof ApiError && value.status === 409 && typeof value.detail === "object" && value.detail !== null && "artifact_id" in value.detail ? "This explanation was rejected." : value.message); } });
+    return () => next.abort();
+  }, [sentence.id, sentence.provenance?.revision, attempt]);
+  const more = () => {
+    const signal = controller.current?.signal;
+    setExtrasLoading(true); setExtrasError(null);
+    void explainSentenceExtras(sentence.id, { signal }).then((value) => { if (!signal?.aborted) setExtras(value); })
+      .catch((value: Error) => { if (!signal?.aborted) setExtrasError(value); })
+      .finally(() => { if (!signal?.aborted) setExtrasLoading(false); });
+  };
+  const rejectedId = (value: Error | null) => value instanceof ApiError && typeof value.detail === "object" && value.detail !== null && "artifact_id" in value.detail ? Number(value.detail.artifact_id) : undefined;
+  const coreRejected = rejectedId(failure);
+  const extrasRejected = rejectedId(extrasError);
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -54,7 +58,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
           <DialogTitle className="font-zh text-lg leading-relaxed">{sentence.zh}</DialogTitle>
           <DialogDescription className="space-y-0.5">
             {result?.pinyin && <span className="block text-[13px] text-stone-400">{result.pinyin}</span>}
-            {sentence.en && <span className="block text-xs text-stone-500">{sentence.en}</span>}
+            {sentence.en && <span className="block text-xs text-muted-foreground">{sentence.en}</span>}
           </DialogDescription>
         </DialogHeader>
 
@@ -63,12 +67,14 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
             {error.includes("503") ? "AI provider is unavailable right now." : error}
           </p>
         )}
+        {coreRejected && <ArtifactFeedback artifactId={coreRejected} sentenceId={sentence.id} rejected onRetry={() => setAttempt((value) => value + 1)} />}
+        {error && !coreRejected && <Button variant="outline" onClick={() => setAttempt((value) => value + 1)}>Try explanation again</Button>}
         {!result && !error && (
           <div className="space-y-2">
             <Skeleton className="h-5 w-4/5" />
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-16 w-2/3" />
-            <p className="text-[11px] text-stone-600">First look at this sentence — thinking it through…</p>
+            <p className="text-[11px] text-muted-foreground">First look at this sentence — thinking it through…</p>
           </div>
         )}
         {result && (
@@ -77,7 +83,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
             <div className="space-y-1">
               <p className="text-sm leading-relaxed text-stone-100">{result.natural}</p>
               {result.literal && (
-                <p className="text-xs italic leading-relaxed text-stone-500">lit. {result.literal}</p>
+                <p className="text-xs italic leading-relaxed text-muted-foreground">lit. {result.literal}</p>
               )}
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {result.hsk.level && (
@@ -104,13 +110,13 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
                     <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
                       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
                         <span className="font-zh text-base text-teal-200">{word.zh}</span>
-                        {word.py && <span className="text-[11px] text-stone-500">{word.py}</span>}
-                        {word.pos && <span className="text-[10px] uppercase tracking-wide text-stone-600">{posLabel(word.pos)}</span>}
+                        {word.py && <span className="text-[11px] text-muted-foreground">{word.py}</span>}
+                        {word.pos && <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{posLabel(word.pos)}</span>}
                         {word.hsk && <span className="text-[10px] text-teal-500/80">HSK {word.hsk}</span>}
                       </div>
                       <p className="mt-0.5 text-xs leading-relaxed text-stone-400">{word.role}</p>
                       {word.defs && word.defs.length > 0 && (
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600">{word.defs.join(" · ")}</p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{word.defs.join(" · ")}</p>
                       )}
                     </div>
                   ))}
@@ -131,16 +137,13 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
               </Section>
             )}
 
-            {!extras && !extrasFailed && (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-1/3" />
-                <Skeleton className="h-14 w-full" />
-                <p className="text-[11px] text-stone-600">Pronunciation, variations, patterns & pitfalls on the way…</p>
-              </div>
-            )}
-
+            {!extras && !extrasLoading && !extrasRejected && <Button variant="outline" className="min-h-11" onClick={more}>Request more detail</Button>}
+            {extrasLoading && <p role="status" className="text-sm text-muted-foreground">Generating optional pronunciation notes and examples…</p>}
+            {extrasError && <p role="alert" className="text-sm text-amber-200">More detail is unavailable. {extrasRejected ? "This artifact was rejected." : extrasError.message}</p>}
+            {extrasRejected && <ArtifactFeedback artifactId={extrasRejected} label="extra detail" sentenceId={sentence.id} rejected onRetry={more} />}
             {extras && (
               <>
+                <ArtifactFeedback artifactId={extras.artifact_id} label="extra detail" sentenceId={sentence.id} onReject={() => { setExtras(null); setExtrasError(new ApiError(409, { artifact_id: extras.artifact_id }, "Artifact rejected")); }} onRetry={more} />
                 {extras.pronunciation.length > 0 && (
                   <Section label="Pronunciation">
                     <BulletList items={extras.pronunciation} />
@@ -159,7 +162,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
                       {extras.variations.map((variation, i) => (
                         <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
                           <p className="font-zh text-base text-stone-100">{variation.zh}</p>
-                          <p className="text-[11px] text-stone-500">{variation.py}</p>
+                          <p className="text-[11px] text-muted-foreground">{variation.py}</p>
                           <p className="mt-0.5 text-xs text-stone-400">{variation.note}</p>
                         </div>
                       ))}
@@ -173,7 +176,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
                       {extras.pattern.examples.map((example, i) => (
                         <div key={i} className="rounded-lg bg-white/3 px-3 py-2">
                           <p className="font-zh text-base text-stone-100">{example.zh}</p>
-                          <p className="text-[11px] text-stone-500">{example.py}</p>
+                          <p className="text-[11px] text-muted-foreground">{example.py}</p>
                           <p className="mt-0.5 text-xs text-stone-400">{example.en}</p>
                         </div>
                       ))}
@@ -183,12 +186,14 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
 
                 {extras.mistakes.length > 0 && (
                   <Section label="Watch out for">
-                    <BulletList items={extras.mistakes} accent="text-amber-500" />
+                    <BulletList items={extras.mistakes} accent="text-amber-300" />
                   </Section>
                 )}
               </>
             )}
 
+            <p className="text-xs text-muted-foreground">Structure and source-token checks passed. AI meaning, grammar and pronunciation notes can still be wrong; they do not count as learning evidence.</p>
+            <ArtifactFeedback artifactId={result.artifact_id} sentenceId={sentence.id} onReject={() => { controller.current?.abort(); setExtras(null); setResult(null); setFailure(new ApiError(409, { artifact_id: result.artifact_id }, "Artifact rejected")); setError("This explanation was rejected."); }} onRetry={() => setAttempt((value) => value + 1)} />
             <Badge variant="secondary" className="text-[10px] text-muted-foreground">
               AI · {result.model ?? result.provider} — pinyin & HSK from dictionary data
             </Badge>
@@ -202,7 +207,7 @@ export default function ExplainSheet({ sentence, onClose }: Props) {
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section>
-      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-500">{label}</h3>
+      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</h3>
       {children}
     </section>
   );

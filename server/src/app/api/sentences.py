@@ -7,6 +7,7 @@ never invalidates the transcript cache."""
 from __future__ import annotations
 
 import hashlib
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -78,16 +79,21 @@ def get_sentences(
     if item is None:
         raise HTTPException(404)
     # user-set per-track sync nudge shifts display timing; cue times stay pristine
-    offsets = dict(session.execute(
-        select(TextTrack.id, TextTrack.offset_ms).where(TextTrack.item_id == item_id)
-    ).all())
+    offsets = dict(
+        session.execute(
+            select(TextTrack.id, TextTrack.offset_ms).where(TextTrack.item_id == item_id)
+        ).all()
+    )
 
     # the payload is immutable per (content revision, offsets, anki import) —
     # a cheap ETag turns every reopen into a 304 instead of a re-download;
     # analysis_rev covers in-place reanalysis, which keeps sentence ids
     rev = (item.meta or {}).get("analysis_rev", 0)
-    identity_revision = session.scalar(select(func.coalesce(func.sum(SentenceIdentity.revision), 0))
-                                       .where(SentenceIdentity.item_id == item_id))
+    identity_revision = session.scalar(
+        select(func.coalesce(func.sum(SentenceIdentity.revision), 0)).where(
+            SentenceIdentity.item_id == item_id
+        )
+    )
     max_id, n = session.execute(
         select(func.max(Sentence.id), func.count()).where(Sentence.item_id == item_id)
     ).one()
@@ -95,9 +101,13 @@ def get_sentences(
 
     anki_stamp = session.get(Setting, "anki_last_import")
     stamp = ((anki_stamp.value or {}) if anki_stamp else {}).get("at", "")
-    etag = 'W/"' + hashlib.sha1(
-        f"{item_id}:{max_id}:{n}:{rev}:{identity_revision}:{sorted(offsets.items())}:{stamp}".encode()
-    ).hexdigest()[:20] + '"'
+    etag = (
+        'W/"'
+        + hashlib.sha1(
+            f"{item_id}:{max_id}:{n}:{rev}:{identity_revision}:{sorted(offsets.items())}:{stamp}".encode()
+        ).hexdigest()[:20]
+        + '"'
+    )
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304)
     response.headers["ETag"] = etag
@@ -107,19 +117,42 @@ def get_sentences(
         select(Sentence).where(Sentence.item_id == item_id).order_by(Sentence.ordinal)
     ).all()
     in_anki = _anki_matches(session, rows)
-    identities = {identity.id: identity for identity in session.scalars(select(SentenceIdentity).where(SentenceIdentity.item_id == item_id))}
-    tracks = {track.id: track for track in session.scalars(select(TextTrack).where(TextTrack.item_id == item_id))}
+    identities = {
+        identity.id: identity
+        for identity in session.scalars(
+            select(SentenceIdentity).where(SentenceIdentity.item_id == item_id)
+        )
+    }
+    tracks = {
+        track.id: track
+        for track in session.scalars(select(TextTrack).where(TextTrack.item_id == item_id))
+    }
+
     def provenance(sentence):
         identity = identities.get(sentence.id)
         overrides = (identity.overrides or {}) if identity else {}
         track = tracks.get(sentence.track_id)
-        return {"text_source": "corrected" if "zh" in overrides else track.source if track else "unknown",
-                "translation_source": sentence.en_source,
-                "timing_source": "corrected" if "t0_ms" in overrides or "t1_ms" in overrides else
-                                 "estimated" if track and (track.source == "whisper" or (track.source == "transcript" and track.format != "srt")) else "source cues",
-                "alignment_quality": identity.source.get("timing_quality") if identity else None,
-                "temporal_coverage": sentence.align_conf,
-                "revision": identity.revision if identity else 0}
+        return {
+            "text_source": "corrected"
+            if "zh" in overrides
+            else track.source
+            if track
+            else "unknown",
+            "translation_source": sentence.en_source,
+            "timing_source": "corrected"
+            if "t0_ms" in overrides or "t1_ms" in overrides
+            else "estimated"
+            if track
+            and (
+                track.source == "whisper"
+                or (track.source == "transcript" and track.format != "srt")
+            )
+            else "source cues",
+            "alignment_quality": identity.source.get("timing_quality") if identity else None,
+            "temporal_coverage": sentence.align_conf,
+            "revision": identity.revision if identity else 0,
+        }
+
     return {
         "item_id": item_id,
         # the offset baked into these times; the client shifts live nudges
@@ -127,10 +160,14 @@ def get_sentences(
         "zh_offset_ms": offsets.get(rows[0].track_id, 0) if rows else 0,
         "sentences": [
             {
-                "id": s.id, "ord": s.ordinal, "zh": s.zh, "tr": s.trad,
+                "id": s.id,
+                "ord": s.ordinal,
+                "zh": s.zh,
+                "tr": s.trad,
                 "t0": max(0, s.t0_ms + offsets.get(s.track_id, 0)),
                 "t1": max(0, s.t1_ms + offsets.get(s.track_id, 0)),
-                "en": s.en, "conf": s.align_conf,
+                "en": s.en,
+                "conf": s.align_conf,
                 "anki": s.id in in_anki or None,
                 "words": _slim_words(s.analysis, s.zh),
                 "script_variants": script_variants(s.zh),
@@ -141,20 +178,57 @@ def get_sentences(
     }
 
 
-def _explain_response(session: Session, sentence_id: int, task) -> dict:
-    """Shared shell for the two explanation halves (cached per zh text +
-    prompt version; single-flight so a prefetch and a click coalesce). Runs
-    the provider synchronously — seconds, not the job queue."""
+def _explain_response(
+    session: Session, sentence_id: int, task, request_id=None, prefetch=False
+) -> dict:
     from ..ai import provider
+    from ..ai.tasks import ExplanationChanged, ExplanationRejected
+    from ..ai.validation import InvalidExplanation
+    from .ai import policy
 
     sentence = session.get(Sentence, sentence_id)
     if sentence is None:
         raise HTTPException(404)
-    if not provider.available():
-        raise HTTPException(503, "AI provider unavailable (claude CLI not on PATH)")
-    artifact = task(session, sentence)
+    options = policy(session)
+    if not options["enabled"] or (prefetch and not options["prefetch"]):
+        raise HTTPException(409, "AI generation is disabled for this request in Settings")
+    try:
+        if not prefetch:
+            provider.cancel_prefetches()
+        with provider.request_scope(
+            str(request_id) if request_id else None,
+            priority="prefetch" if prefetch else "interactive",
+        ):
+            artifact = task(session, sentence)
+    except ExplanationRejected as error:
+        raise HTTPException(
+            409,
+            {
+                "code": "artifact_rejected",
+                "artifact_id": error.artifact_id,
+                "message": "This explanation was rejected. Request another attempt explicitly.",
+            },
+        ) from error
+    except ExplanationChanged as error:
+        raise HTTPException(409, str(error)) from error
+    except InvalidExplanation as error:
+        raise HTTPException(422, str(error)) from error
+    except provider.ProviderUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    except provider.ProviderBusy as error:
+        raise HTTPException(429, str(error)) from error
+    except provider.ProviderCancelled as error:
+        raise HTTPException(409, "AI request cancelled") from error
+    except provider.ProviderTimeout as error:
+        raise HTTPException(504, str(error)) from error
+    except provider.ProviderFailed as error:
+        raise HTTPException(502, str(error)) from error
     return {
-        **artifact.output,
+        **{key: value for key, value in artifact.output.items() if not key.startswith("_")},
+        "artifact_id": artifact.id,
+        "accepted": artifact.accepted,
+        "prompt_version": artifact.prompt_version,
+        "validation": "Structural and token checks only; language claims need review",
         "provider": artifact.provider,
         "model": artifact.model,
         "created_at": artifact.created_at,
@@ -162,17 +236,27 @@ def _explain_response(session: Session, sentence_id: int, task) -> dict:
 
 
 @router.post("/sentences/{sentence_id}/explain")
-def explain(sentence_id: int, session: Session = Depends(get_session)):
+def explain(
+    sentence_id: int,
+    request_id: UUID | None = None,
+    prefetch: bool = False,
+    session: Session = Depends(get_session),
+):
     from ..ai.tasks import explain_sentence
 
-    return _explain_response(session, sentence_id, explain_sentence)
+    return _explain_response(session, sentence_id, explain_sentence, request_id, prefetch)
 
 
 @router.post("/sentences/{sentence_id}/explain-extras")
-def explain_extras(sentence_id: int, session: Session = Depends(get_session)):
+def explain_extras(
+    sentence_id: int,
+    request_id: UUID | None = None,
+    prefetch: bool = False,
+    session: Session = Depends(get_session),
+):
     from ..ai.tasks import explain_sentence_extras
 
-    return _explain_response(session, sentence_id, explain_sentence_extras)
+    return _explain_response(session, sentence_id, explain_sentence_extras, request_id, prefetch)
 
 
 class LookupIn(BaseModel):
@@ -190,9 +274,14 @@ def _lexeme_payload(session: Session, lex: Lexeme, max_senses: int = 8) -> dict:
         select(SavedItem.id).where(SavedItem.lexeme_id == lex.id, SavedItem.archived.is_(False))
     )
     return {
-        "lexeme_id": lex.id, "simplified": lex.simplified, "traditional": lex.traditional,
-        "pinyin": lex.pinyin, "hsk": lex.hsk_level, "is_dict": lex.is_dict,
-        "pos": lex.pos, "freq_rank": lex.freq_rank,
+        "lexeme_id": lex.id,
+        "simplified": lex.simplified,
+        "traditional": lex.traditional,
+        "pinyin": lex.pinyin,
+        "hsk": lex.hsk_level,
+        "is_dict": lex.is_dict,
+        "pos": lex.pos,
+        "freq_rank": lex.freq_rank,
         "senses": [{"py": s.pinyin, "trad": s.traditional, "defs": s.glosses} for s in senses],
         "state": state.state if state else "new",
         "state_source": state.source if state else None,
@@ -230,6 +319,7 @@ def get_lexeme(lexeme_id: int, session: Session = Depends(get_session)):
     stats = session.get(LexemeStats, lexeme_id)
     payload = _lexeme_payload(session, lex)
     from ..evidence import lexeme_evidence
+
     payload["evidence"] = lexeme_evidence(session, lexeme_id)
     payload["stats"] = {
         "encounters": stats.encounters if stats else 0,

@@ -32,9 +32,9 @@ export interface SentenceOut {
   script_variants?: Record<string, string>;
 }
 
-// The explanation arrives in two parallel halves: core (renders first) and
-// extras (fills in below). Both cached server-side per zh text.
-export interface ExplainCore {
+// Optional core and extras use separately validated, source-bound artifacts.
+interface AIProvenance { artifact_id: number; accepted: boolean | null; prompt_version: string; validation: string }
+export interface ExplainCore extends AIProvenance {
   natural: string;
   literal: string;
   structure: string;
@@ -47,7 +47,7 @@ export interface ExplainCore {
   created_at: string;
 }
 
-export interface ExplainExtras {
+export interface ExplainExtras extends AIProvenance {
   pronunciation: string[];
   nuance: string;
   variations: { zh: string; py?: string; note: string }[];

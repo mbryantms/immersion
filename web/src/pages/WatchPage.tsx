@@ -16,6 +16,7 @@ import { post } from "../api/client";
 import {
   patchTrackOffset,
   prefetchExplain,
+  useAIPolicy,
   queueTranscribe,
   saveProgress,
   useItem,
@@ -76,7 +77,12 @@ function WatchSession() {
   const [nudgeHidden, setNudgeHidden] = useState(true);
   const [transcribeQueued, setTranscribeQueued] = useState(false);
   const sessionLookups = useRef<Map<number, SessionLookup>>(new Map());
-  const prefetchedExplains = useRef<Set<number>>(new Set());
+  const { data: aiPolicy } = useAIPolicy();
+  const prefetchedExplains = useRef<Set<string>>(new Set());
+  const prefetchController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => { prefetchController.current?.abort(); prefetchedExplains.current.clear(); };
+  }, [id, aiPolicy?.enabled, aiPolicy?.prefetch]);
   const playedSeconds = useRef(0);
   const subOffsetRef = useRef<number | null>(null); // survives rapid keypresses
   const [subOffset, setSubOffset] = useState<number | null>(null);
@@ -254,15 +260,17 @@ function WatchSession() {
           sentenceId: sentence.id,
         });
       }
-      // a lookup is a confusion signal: warm the explanation cache so a
-      // follow-up Explain click lands on (or joins) an in-flight generation
-      if (!prefetchedExplains.current.has(sentence.id)) {
-        prefetchedExplains.current.add(sentence.id);
-        prefetchExplain(sentence.id);
+      const context = JSON.stringify([sentence.id, sentence.provenance?.revision, sentence.zh]);
+      if (aiPolicy?.enabled && aiPolicy.prefetch && !prefetchedExplains.current.has(context)) {
+        prefetchController.current?.abort();
+        const controller = new AbortController();
+        prefetchController.current = controller;
+        prefetchedExplains.current.add(context);
+        void prefetchExplain(sentence.id, controller.signal);
       }
       setGloss({ sentence, word });
     },
-    [],
+    [aiPolicy?.enabled, aiPolicy?.prefetch],
   );
 
   const closeGloss = useCallback(() => setGloss(null), []);

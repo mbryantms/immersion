@@ -460,7 +460,7 @@ def test_explanation_cache_tracks_local_reading_and_meaning(client, indexed, mon
 
     def complete(prompt, timeout_s=0):
         calls.append(prompt)
-        return {"natural": "Hello.", "words": [{"zh": "你好", "role": "greeting"}]}
+        return {"natural": "Hello.", "literal": "hello", "structure": "A greeting", "words": [{"zh": "你好", "role": "greeting"}], "particles": []}
 
     monkeypatch.setattr(provider, "available", lambda: True)
     monkeypatch.setattr(provider, "complete_json", complete)

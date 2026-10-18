@@ -26,7 +26,8 @@ export const test = base.extend({
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname.replace("/api", "");
       let payload: unknown = {};
-      if (path === "/scenes") payload = { items: [] };
+      if (path === "/ai-policy") payload = { enabled: true, prefetch: false, provider_available: false };
+      else if (path === "/scenes") payload = { items: [] };
       else if (path === "/constructions") payload = { version: "test", items: [] };
       else if (path === "/mining/budget") payload = { daily_word_budget: 5, used: 0, remaining: 5, timezone: "UTC", soft_limit: true };
       else if (path === "/learner-profile") payload = { goal: "listen", level: "unknown", script: "source", interests: [] };
