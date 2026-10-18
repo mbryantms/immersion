@@ -26,21 +26,27 @@ from .video import EN_MARKERS, ZH_MARKERS
 TEXT_SUB_CODECS = {"subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"}
 
 
-def sub_path(item_id: int, stream_index: int) -> Path:
-    return settings.subs_dir / f"{item_id}.{stream_index}.srt"
+def sub_path(item_id: int, stream_index: int, fingerprint: str | None = None) -> Path:
+    return settings.subs_dir / f"{item_id}.{stream_index}.{fingerprint or 'legacy'}.srt"
 
 
 def extract_stream(video: Path, stream_index: int, out: Path) -> bool:
     """Demux one subtitle stream to SRT. False when ffmpeg can't convert it."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        ["ffmpeg", "-loglevel", "error", "-i", str(video),
-         "-map", f"0:{stream_index}", "-c:s", "srt", "-y", str(out)],
-        capture_output=True, text=True,
-    )
-    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
-        out.unlink(missing_ok=True)
+    temporary = out.with_suffix(".part.srt")
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-loglevel", "error", "-i", str(video),
+             "-map", f"0:{stream_index}", "-c:s", "srt", "-y", str(temporary)],
+            capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        temporary.unlink(missing_ok=True)
         return False
+    if proc.returncode != 0 or not temporary.exists() or temporary.stat().st_size == 0:
+        temporary.unlink(missing_ok=True)
+        return False
+    temporary.replace(out)
     return True
 
 
@@ -63,24 +69,15 @@ def ensure_embedded_tracks(session: Session, item: MediaItem, video: Path) -> li
         select(TextTrack).where(TextTrack.item_id == item.id, TextTrack.source == "embedded")
     ).all()
     by_index = {(t.meta or {}).get("stream_index"): t for t in existing}
-    sidecar_langs = {
-        t.lang
-        for t in session.scalars(
-            select(TextTrack).where(
-                TextTrack.item_id == item.id, TextTrack.source == "sidecar", TextTrack.selected
-            )
-        )
-    }
 
+    successful = set()
     for s in streams:
         idx = s.get("index")
         if idx is None or (s.get("codec") or "") not in TEXT_SUB_CODECS:
             continue
         lang = _stream_lang(s)
-        if lang in sidecar_langs:
-            continue  # sidecar of the same language wins
-        out = sub_path(item.id, idx)
-        if not out.exists() and not extract_stream(video, idx, out):
+        out = sub_path(item.id, idx, item.fingerprint)
+        if (not out.is_file() or out.stat().st_size == 0) and not extract_stream(video, idx, out):
             continue
         if lang is None:
             try:
@@ -88,23 +85,30 @@ def ensure_embedded_tracks(session: Session, item: MediaItem, video: Path) -> li
             except (UnicodeDecodeError, OSError):
                 continue
             lang = "zh" if cjk_ratio(text) > 0.2 else "en"
-            if lang in sidecar_langs:
-                continue
+        successful.add(idx)
         content_hash = hashlib.sha256(out.read_bytes()).hexdigest()[:16]
         track = by_index.get(idx)
         if track is None:
             track = TextTrack(
                 item_id=item.id, lang=lang, source="embedded", relpath=None,
                 format="srt", encoding="utf-8", content_hash=content_hash,
-                meta={"stream_index": idx, "codec": s.get("codec")},
+                meta={"stream_index": idx, "codec": s.get("codec"), "available": True, "fingerprint": item.fingerprint},
             )
             session.add(track)
             existing.append(track)
-        elif track.content_hash != content_hash:
+        else:
             track.content_hash = content_hash
             track.lang = lang
+            track.meta = {**(track.meta or {}), "available": True, "fingerprint": item.fingerprint}
 
+    for track in existing:
+        if (track.meta or {}).get("stream_index") not in successful:
+            track.meta = {**(track.meta or {}), "available": False}
+            track.selected = False
     item.meta = {**(item.meta or {}), "embedded_checked": item.fingerprint}
+    session.flush()
+    from ..tracks import choose_tracks
+    choose_tracks(session, item)
     session.flush()
     return existing
 

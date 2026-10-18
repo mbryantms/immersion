@@ -1,0 +1,39 @@
+{
+  "scope": "Synthetic local SQLite/API-handler timings; excludes HTTP, browser, media encoding and Anki Desktop. One warmup excluded. Managed cloud Linux, not user hardware.",
+  "before_indexes": {
+    "platform": "Linux x86_64",
+    "python": "3.12.14",
+    "sqlite": "3.53.1",
+    "cards": 10000,
+    "linked": 2000,
+    "runs": 20,
+    "timings": {
+      "inbox_30": {
+        "p50_ms": 340.49,
+        "p95_ms": 342.88
+      },
+      "history_20": {
+        "p50_ms": 0.78,
+        "p95_ms": 0.9
+      }
+    }
+  },
+  "after_indexes": {
+    "platform": "Linux x86_64",
+    "python": "3.12.14",
+    "sqlite": "3.53.1",
+    "cards": 10000,
+    "linked": 2000,
+    "runs": 20,
+    "timings": {
+      "inbox_30": {
+        "p50_ms": 2.97,
+        "p95_ms": 3.15
+      },
+      "history_20": {
+        "p50_ms": 0.77,
+        "p95_ms": 0.88
+      }
+    }
+  }
+}

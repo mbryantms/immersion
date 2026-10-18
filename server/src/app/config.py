@@ -58,3 +58,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_root_slug(slug: str) -> str:
+    import re
+    if slug in {"thumbs", "audio", "remux"} or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", slug):
+        raise ValueError("Use 1–64 ASCII letters, digits, underscores or hyphens; thumbs/audio/remux are reserved")
+    return slug

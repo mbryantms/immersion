@@ -8,6 +8,7 @@ crossing token boundaries still hit; latin queries hit pinyin + english."""
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select, text
@@ -15,6 +16,8 @@ from sqlalchemy.orm import Session
 
 from ..db import get_session
 from ..models import ExampleSentence, Lexeme, MediaItem, Sentence, TokenOccurrence
+from ..lingua.convert import t2s
+from ..timing import effective_times
 
 router = APIRouter()
 
@@ -24,16 +27,24 @@ CJK = re.compile(r"[㐀-鿿]")
 def _fts_query(q: str) -> str:
     """CJK input -> phrase over spaced chars ('磨坊主' -> '"磨 坊 主"');
     anything else -> prefix-matched terms over pinyin/en columns."""
-    q = q.strip().replace('"', "")
+    q = t2s(unicodedata.normalize("NFKC", q.strip()))
     if CJK.search(q):
         chars = " ".join(ch for ch in q if CJK.match(ch))
         return f'"{chars}"'
-    terms = [t for t in re.split(r"\s+", q) if t]
-    return " ".join(f"{t}*" for t in terms)
+    q = "".join(ch for ch in unicodedata.normalize("NFD", q.lower())
+                if unicodedata.category(ch) != "Mn")
+    terms = re.findall(r"[^\W_]+", q, flags=re.UNICODE)
+    # Treat input as literal terms, never as FTS operators or column selectors.
+    # A single alphanumeric term may be an English identifier (e.g. en1).
+    # Numbered, spaced syllable sequences are unambiguously pinyin input.
+    if len(terms) > 1 and all(re.fullmatch(r"[a-z]+[1-5]", term) for term in terms):
+        terms = [term[:-1] for term in terms]
+    return " ".join(f'"{term}"*' for term in terms)
 
 
 def _result(session: Session, s: Sentence) -> dict:
     item = session.get(MediaItem, s.item_id)
+    t0, t1 = effective_times(session, s)
     return {
         "sentence_id": s.id,
         "item_id": s.item_id,
@@ -42,8 +53,8 @@ def _result(session: Session, s: Sentence) -> dict:
         "zh": s.zh,
         "trad": s.trad,
         "en": s.en,
-        "t0_ms": s.t0_ms,
-        "t1_ms": s.t1_ms,
+        "t0_ms": t0,
+        "t1_ms": t1,
     }
 
 

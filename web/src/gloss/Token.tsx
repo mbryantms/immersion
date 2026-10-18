@@ -21,7 +21,7 @@ export const Token = memo(function Token({
   showPinyin,
   onTap,
 }: TokenProps) {
-  if (word.type === "x") return <span className="x text-neutral-400">{word.t}</span>;
+  if (word.type === "x") return <span data-source-start={word.start} data-source-end={word.end} className="x whitespace-pre-wrap text-neutral-400">{word.t}</span>;
 
   // OOV proper names (人名/地名 without a dictionary entry) carry the 专名号
   // underline instead of a knowledge-state one — they're cast, not vocabulary.
@@ -29,7 +29,7 @@ export const Token = memo(function Token({
   const display = traditional && word.tr ? word.tr : word.t;
   const tones = word.tones ?? [];
   const py = word.py ?? [];
-  const charwise = display.length === tones.length;
+  const charwise = [...display].length === tones.length;
 
   const chars = charwise
     ? [...display].map((ch, i) => {
@@ -47,12 +47,16 @@ export const Token = memo(function Token({
 
   return (
     <span
+      data-source-start={word.start}
+      data-source-end={word.end}
+      lang={traditional ? "zh-Hant" : "zh-Hans"}
       role="button"
       tabIndex={0}
       aria-label={`Look up ${display}`}
       className={`w ${isName ? "nm" : `k-${state}`}${saved ? " saved" : ""}`}
       onClick={(e) => {
         e.stopPropagation();
+        e.currentTarget.focus({ preventScroll: true });
         onTap?.(word);
       }}
       onKeyDown={(e) => {

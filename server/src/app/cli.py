@@ -14,12 +14,15 @@ def main() -> None:
     sub.add_parser("upgrade", help="run DB migrations")
 
     p_root = sub.add_parser("add-root", help="register a media root and queue a scan")
-    p_root.add_argument("slug")
+    from .config import validate_root_slug
+    p_root.add_argument("slug", type=validate_root_slug)
     p_root.add_argument("path")
     p_root.add_argument("--kind", default="video", choices=["video", "podcast"])
     p_root.add_argument("--include", default=None, help="glob(s), ';'-separated, e.g. 'Level */*'")
 
     sub.add_parser("scan", help="queue a scan of all roots")
+    p_reanalyze = sub.add_parser("reanalyze", help="backfill Mandarin metadata in place; preserves sentence IDs")
+    p_reanalyze.add_argument("--item-id", type=int, default=None, help="one item; otherwise queue all items")
 
     args = ap.parse_args()
 
@@ -56,6 +59,13 @@ def main() -> None:
             session.commit()
             enqueue(session, "scan_root", {"root_id": root.id})
             print(f"root {args.slug} -> #{root.id}, scan queued")
+        elif args.cmd == "reanalyze":
+            if args.item_id is not None:
+                enqueue(session, "reanalyze_item", {"item_id": args.item_id}, priority=-1)
+                print(f"queued in-place analysis for item {args.item_id}")
+            else:
+                enqueue(session, "reanalyze_all", None, priority=-1)
+                print("queued in-place analysis backfill; run the worker to process items")
         elif args.cmd == "scan":
             enqueue(session, "scan_all", None)
             print("scan queued")

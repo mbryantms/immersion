@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
+from pydantic import BaseModel, Field
+from typing import Literal
 from sqlalchemy.orm import Session
 
 from ..db import get_session
@@ -49,3 +51,25 @@ def put_settings(body: dict, session: Session = Depends(get_session)):
         session.merge(Setting(key=key, value=value))
     session.commit()
     return {"ok": True}
+
+
+class LearnerProfile(BaseModel):
+    goal: Literal["read", "listen", "dictate"] = "listen"
+    level: Literal["unknown", "beginner", "intermediate", "advanced"] = "unknown"
+    script: Literal["source", "simplified", "traditional"] = "source"
+    interests: list[str] = Field(default_factory=list, max_length=10)
+
+
+@router.get("/learner-profile")
+def get_learner_profile(session: Session = Depends(get_session)):
+    row = session.get(Setting, "learner_profile")
+    return LearnerProfile.model_validate(row.value if row else {}).model_dump()
+
+
+@router.put("/learner-profile")
+def put_learner_profile(body: LearnerProfile, session: Session = Depends(get_session)):
+    data = body.model_dump()
+    data["interests"] = [interest.strip()[:80] for interest in body.interests if interest.strip()]
+    session.merge(Setting(key="learner_profile", value=data))
+    session.commit()
+    return data

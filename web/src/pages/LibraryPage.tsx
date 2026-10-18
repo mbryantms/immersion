@@ -7,7 +7,7 @@ import { EmptyState, Page, PageHeader, SectionHeader } from "@/components/layout
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FilterGroup, FilterOption } from "@/components/ui/filter-group";
 import type { SeriesSummary } from "../api/types";
 import { useLibrary } from "../api/queries";
 
@@ -30,7 +30,7 @@ export default function LibraryPage() {
         description="Sort by familiarity when you want easier input, or browse by level when you want a structured progression."
         actions={
           <Select value={sort} onValueChange={(value) => setSort(value as Sort)}>
-            <SelectTrigger className="w-44"><ArrowUpDown className="size-3.5" /><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label="Sort library" className="w-44"><ArrowUpDown className="size-3.5" /><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="level">Level order</SelectItem><SelectItem value="coverage">Most familiar</SelectItem><SelectItem value="title">Title A–Z</SelectItem></SelectContent>
           </Select>
         }
@@ -48,13 +48,13 @@ export default function LibraryPage() {
           <section>
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <SectionHeader title="Browse series" description={`${series.length} collection${series.length === 1 ? "" : "s"}`} />
-              <Tabs value={kind} onValueChange={(value) => setKind(value as Kind)}>
-                <TabsList>
-                  <TabsTrigger value="all"><LibraryBig className="mr-1 size-3.5" />All</TabsTrigger>
-                  <TabsTrigger value="video"><Video className="mr-1 size-3.5" />Video</TabsTrigger>
-                  <TabsTrigger value="podcast"><Headphones className="mr-1 size-3.5" />Podcasts</TabsTrigger>
-                </TabsList>
-              </Tabs>
+              <FilterGroup type="single" aria-label="Filter library by media type" value={kind} onValueChange={(value) => { if (value) setKind(value as Kind); }}>
+
+                  <FilterOption value="all"><LibraryBig className="mr-1 size-3.5" />All</FilterOption>
+                  <FilterOption value="video"><Video className="mr-1 size-3.5" />Video</FilterOption>
+                  <FilterOption value="podcast"><Headphones className="mr-1 size-3.5" />Podcasts</FilterOption>
+
+              </FilterGroup>
             </div>
 
             {!series.length ? (
@@ -79,7 +79,7 @@ export default function LibraryPage() {
 }
 
 function makeSections(series: SeriesSummary[], sort: Sort) {
-  if (sort === "coverage") return [{ heading: "Most comprehensible first", description: "Based on words already known or ignored", list: [...series].sort((a, b) => (b.coverage ?? -1) - (a.coverage ?? -1)) }];
+  if (sort === "coverage") return [{ heading: "Most familiar vocabulary first", description: "Estimated from known and familiar words; ignored words are excluded", list: [...series].sort((a, b) => (b.coverage ?? -1) - (a.coverage ?? -1)) }];
   if (sort === "title") return [{ heading: "All series", description: "Alphabetical order", list: [...series].sort((a, b) => a.title.localeCompare(b.title)) }];
   const byLevel = new Map<number | null, SeriesSummary[]>();
   for (const item of series) byLevel.set(item.level, [...(byLevel.get(item.level) ?? []), item]);

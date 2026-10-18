@@ -19,10 +19,13 @@ import { cn } from "@/lib/utils";
 import { updateHaltSupport } from "./lib/haltSupport";
 import { ZH_FONTS, usePrefs } from "./lib/prefs";
 
+const ScenePage = lazy(() => import("./pages/ScenePage"));
+const PracticePage = lazy(() => import("./pages/PracticePage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const JobsPage = lazy(() => import("./pages/JobsPage"));
 const LibraryPage = lazy(() => import("./pages/LibraryPage"));
 const ReviewPage = lazy(() => import("./pages/ReviewPage"));
+const ExportPage = lazy(() => import("./pages/ExportPage"));
 const SavedPage = lazy(() => import("./pages/SavedPage"));
 const SearchPage = lazy(() => import("./pages/SearchPage"));
 const SeriesPage = lazy(() => import("./pages/SeriesPage"));
@@ -39,9 +42,9 @@ interface NavItem {
 
 const primaryNav: NavItem[] = [
   { to: "/", label: "Home", icon: Home },
-  { to: "/library", label: "Library", icon: BookOpen, matches: ["/series/", "/watch/"] },
+  { to: "/library", label: "Library", icon: BookOpen, matches: ["/series/", "/watch/", "/scenes/", "/practice"] },
   { to: "/review", label: "Review", icon: ChartNoAxesColumnIncreasing },
-  { to: "/saved", label: "Saved", icon: Bookmark },
+  { to: "/saved", label: "Saved", icon: Bookmark, matches: ["/exports"] },
   { to: "/search", label: "Search", icon: Search, matches: ["/word/"] },
 ];
 
@@ -55,7 +58,14 @@ export default function App() {
   useEffect(() => {
     const stack = (ZH_FONTS[zhFont] ?? ZH_FONTS.sans).stack;
     document.documentElement.style.setProperty("--font-zh", stack);
-    void updateHaltSupport(stack);
+    let current = true;
+    const loadFont = zhFont === "serif"
+      ? Promise.all([import("@fontsource/noto-serif-sc/400.css"), import("@fontsource/noto-serif-sc/700.css")])
+      : zhFont === "wenkai" || zhFont === "kai"
+        ? Promise.all([import("@fontsource/lxgw-wenkai/500.css"), import("@fontsource/lxgw-wenkai/700.css")])
+        : Promise.resolve();
+    void loadFont.catch(() => {}).then(() => { if (current) void updateHaltSupport(stack); });
+    return () => { current = false; };
   }, [zhFont]);
 
   return (
@@ -68,6 +78,7 @@ export default function App() {
         toastOptions={{ style: { background: "#18201d", border: "1px solid rgb(255 255 255 / 0.1)", color: "#e7e5e4" } }}
       />
       <div className="min-h-screen pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
+        <a href="#main-content" className="skip-link">Skip to content</a>
         <header className="sticky top-0 z-40 h-[53px] border-b border-border/70 bg-background/82 px-3 backdrop-blur-xl supports-[backdrop-filter]:bg-background/72 sm:px-5">
           <div className="mx-auto flex h-full max-w-[1680px] items-center">
             <NavLink to="/" className="mr-5 flex items-center gap-2.5" aria-label="Immersion home">
@@ -88,13 +99,17 @@ export default function App() {
           </div>
         </header>
 
+        <div id="main-content" tabIndex={-1}>
         <ErrorBoundary>
         <Suspense fallback={<LoadingPage />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/practice" element={<PracticePage />} />
+            <Route path="/scenes/:id" element={<ScenePage />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/series/:id" element={<SeriesPage />} />
             <Route path="/watch/:id" element={<WatchPage />} />
+            <Route path="/exports" element={<ExportPage />} />
             <Route path="/saved" element={<SavedPage />} />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/search" element={<SearchPage />} />
@@ -104,6 +119,7 @@ export default function App() {
           </Routes>
         </Suspense>
         </ErrorBoundary>
+        </div>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden" aria-label="Mobile navigation">
           <div className="mx-auto grid h-16 max-w-lg grid-cols-6 px-1.5">

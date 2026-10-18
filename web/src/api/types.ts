@@ -2,6 +2,12 @@
 
 export interface Word {
   t: string;
+  canonical?: string;
+  start?: number; // Unicode codepoints, half-open source offsets
+  end?: number;
+  reading?: string;
+  meaning?: string;
+  reading_source?: string;
   type: "zh" | "x";
   py?: string[];
   tones?: number[];
@@ -20,13 +26,15 @@ export interface SentenceOut {
   t1: number;
   en: string | null;
   conf: number | null;
+  provenance?: { text_source: string; translation_source: string | null; timing_source: string; temporal_coverage: number | null; alignment_quality?: { matched_fraction: number; interpolated: boolean } | null; revision: number };
   anki?: boolean; // already exists as an Anki card
   words: Word[];
+  script_variants?: Record<string, string>;
 }
 
-// The explanation arrives in two parallel halves: core (renders first) and
-// extras (fills in below). Both cached server-side per zh text.
-export interface ExplainCore {
+// Optional core and extras use separately validated, source-bound artifacts.
+interface AIProvenance { artifact_id: number; accepted: boolean | null; prompt_version: string; validation: string }
+export interface ExplainCore extends AIProvenance {
   natural: string;
   literal: string;
   structure: string;
@@ -39,7 +47,7 @@ export interface ExplainCore {
   created_at: string;
 }
 
-export interface ExplainExtras {
+export interface ExplainExtras extends AIProvenance {
   pronunciation: string[];
   nuance: string;
   variations: { zh: string; py?: string; note: string }[];
@@ -121,7 +129,9 @@ export interface ItemDetail {
   series: { id: number; title: string; level: number | null } | null;
   stream_url: string;
   thumb_url: string;
-  tracks: { id: number; lang: string; source: string; format: string; offset_ms: number; selected: boolean }[];
+  tracks: { id: number; lang: string; source: string; format: string; offset_ms: number; selected: boolean; available?: boolean; label?: string }[];
+  active_tracks?: { zh: number | null; en: number | null };
+  source_status?: string | null;
   n_sentences: number;
   progress: { position_ms: number; completed: boolean; subtitle_mode: string | null };
   prev_item_id: number | null;
@@ -132,8 +142,7 @@ export interface ItemDetail {
   unknown_lexemes?: number;
 }
 
-// familiar = derived automatically from repeated passive exposure without
-// lookups; renders like known, demoted to learning by any lookup
+// Familiarity is an exposure estimate. Lookups do not imply failure.
 export type KnowledgeStateName = "new" | "learning" | "familiar" | "known" | "ignored";
 
 export interface KnowledgeMap {
@@ -154,6 +163,12 @@ export interface LexemeInfo {
   state: KnowledgeStateName;
   state_source: string | null;
   saved_item_id: number | null;
+  evidence?: {
+    exposure: { independent_encounters: number; items: number; days: number; policy: string };
+    recent_retrieval: { task: string; method: string; assistance: string; score: number; ts: string; scope: { reading?: string | null; meaning?: string | null; delayed?: boolean } }[];
+    unassessed: string[];
+    limitation: string;
+  };
   stats?: { encounters: number; lookups: number; distinct_items: number; first_seen: string | null; last_seen: string | null };
 }
 
@@ -163,10 +178,13 @@ export interface LookupResult {
 }
 
 export interface SavedItemOut {
+  archived?: boolean;
   id: number;
   kind: "word" | "sentence";
   lexeme_id: number | null;
   surface: string | null;
+  selected_reading?: string | null;
+  selected_meaning?: string | null;
   note: string | null;
   tags: string[] | null;
   created_at: string;
@@ -201,17 +219,21 @@ export interface ExportPreviewItem {
   duplicates: number;
   duplicate_meanings: string[];
   already_exported: number | null;
+  source_hash: string;
+  errors: string[];
 }
 
 export interface ExportPreview {
+  profile_hash: string;
+  preflight: import("../anki-types").AnkiPreflight;
   deck: string;
   model: string;
   items: ExportPreviewItem[];
 }
 
 export interface ReviewContext {
-  sentence_id: number;
-  item_id: number;
+  sentence_id: number | null;
+  item_id: number | null;
   item_kind: string | null;
   item_available: boolean;
   stream_url: string | null;
@@ -220,6 +242,8 @@ export interface ReviewContext {
   t0_ms: number;
   t1_ms: number;
   words: Word[];
+  script_variants?: Record<string, string>;
+  source_revision?: number;
 }
 
 export interface ReviewItem {
@@ -231,9 +255,11 @@ export interface ReviewItem {
   rung: number;
   streak: number;
   context: ReviewContext | null;
+  answer?: { pinyin: string | null; senses: { py: string | null; defs: string[] }[] };
 }
 
 export interface ReviewOutcome {
+  result?: "pass" | "fail";
   rung: number;
   graduated: boolean;
   already_in_anki: boolean;
@@ -250,6 +276,8 @@ export interface WeekStat {
 }
 
 export interface DashboardStats {
+  excluded_question_results?: number;
+  practice_evidence?: { task: string; method: string; assistance: string; attempts: number; mean_score: number }[];
   weeks: WeekStat[];
   totals: { lookups: number; sentences_played: number; saves: number };
   recurring_unknowns: {
@@ -264,6 +292,13 @@ export interface DashboardStats {
   anki: { last_import: unknown; last_export: unknown };
 }
 
+export interface LearnerProfile {
+  goal: "read" | "listen" | "dictate";
+  level: "unknown" | "beginner" | "intermediate" | "advanced";
+  script: "source" | "simplified" | "traditional";
+  interests: string[];
+}
+
 export interface Recommendation {
   item_id: number;
   title: string;
@@ -275,6 +310,14 @@ export interface Recommendation {
   thumb_url: string;
   coverage: number;
   unknown_lexemes: number;
+  unknowns_per_minute?: number;
+  dense_unknowns_30s?: number;
+  subtitle_characters_per_minute?: number;
+  subtitle_source?: string;
+  source_warning?: boolean;
+  goal?: string;
+  reasons?: string[];
+  uncertainty?: string;
 }
 
 export interface SearchResult {
@@ -300,4 +343,49 @@ export interface JobOut {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface GuidedQuestion {
+  id: number;
+  revision: number;
+  category: string;
+  prompt: string;
+  passage: string;
+  choices: string[];
+  provenance: string;
+  externally_validated: boolean;
+}
+export interface MeaningFeedback {
+  correct: boolean;
+  answer: number;
+  choice: number;
+  explanations: string[];
+  provenance?: string;
+}
+export interface GuidedScene {
+  id: number;
+  item_id: number;
+  goal: "read" | "listen";
+  stage: "watch" | "clarify" | "reduce" | "check" | "complete";
+  revision: number;
+  snapshot: { title: string; fingerprint: string | null; kind: string; t0: number; t1: number; lines: { id: number; zh: string; en: string | null; translation_source: string | null; t0: number; t1: number; revision: number; words: Word[] }[] };
+  support: Record<string, unknown> & { checked?: boolean; reflection?: boolean; answer_feedback?: MeaningFeedback };
+  revisits: number;
+  due_at: string | null;
+  completed_at: string | null;
+  source_current: boolean;
+  stream_url: string | null;
+  question: GuidedQuestion | null;
+}
+export interface SceneSummary {
+  id: number; item_id: number; title: string; goal: string; stage: string;
+  revision: number; due_at: string | null; due: boolean; duration_ms: number;
+}
+export interface MiningBudget {
+  daily_word_budget: number; used: number; remaining: number; timezone: string; soft_limit: boolean;
+}
+export interface Construction {
+  id: string; title: string; note: string; suspended: boolean;
+  examples: { zh: string; en: string }[];
+  question: { category: string; prompt: string; passage: string; choices: string[] };
 }

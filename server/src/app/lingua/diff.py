@@ -3,18 +3,18 @@
 scores locally for instant feedback; this is the server-side reference used by
 the review queue.
 
-Only CJK characters count: punctuation and spacing aren't listening skill."""
+Letters and numbers count; punctuation and spacing do not. Script equivalence
+is optional and restricted to verified one-to-one pairs."""
 
 from __future__ import annotations
 
-import re
+import unicodedata
 from dataclasses import dataclass
 
-CJK = re.compile(r"[㐀-鿿]")
-
-
 def norm_zh(text: str) -> str:
-    return "".join(ch for ch in text if CJK.match(ch))
+    """Ignore layout/punctuation, preserving names, numbers, and non-Han speech."""
+    text = unicodedata.normalize("NFKC", text).lower()
+    return "".join(ch for ch in text if unicodedata.category(ch)[0] in ("L", "N"))
 
 
 def lcs_ops(a: str, b: str) -> list[tuple[str, str]]:
@@ -49,18 +49,30 @@ def lcs_ops(a: str, b: str) -> list[tuple[str, str]]:
 
 @dataclass
 class DictationResult:
-    score: float  # matched chars / expected chars; 1.0 when expected is empty
+    score: float  # 1 - edit distance / longer input; punctuation is ignored
     ops: list[tuple[str, str]]
 
 
 PASS_SCORE = 0.95  # same threshold the reader UI marks green
 
 
-def score_attempt(expected_zh: str, typed: str) -> DictationResult:
+def score_attempt(expected_zh: str, typed: str, script_policy: str = "source") -> DictationResult:
+    if script_policy not in ("source", "equivalent"):
+        raise ValueError("unknown script policy")
+    if script_policy == "equivalent":
+        from .script_policy import script_variants
+        variants = script_variants(expected_zh)
+        typed = "".join(variants.get(ch, ch) for ch in typed)
     expected = norm_zh(expected_zh)
     typed_n = norm_zh(typed)
-    if not expected:
-        return DictationResult(score=1.0, ops=[])
     ops = lcs_ops(expected, typed_n)
-    ok = sum(1 for op, _ in ops if op == "eq")
-    return DictationResult(score=ok / len(expected), ops=ops)
+    # LCS is useful for feedback, but recall-only scoring ignores insertions.
+    # Levenshtein counts a substitution once and penalizes extra negation too.
+    previous = list(range(len(typed_n) + 1))
+    for i, a in enumerate(expected, 1):
+        row = [i]
+        for j, b in enumerate(typed_n, 1):
+            row.append(min(row[-1] + 1, previous[j] + 1, previous[j - 1] + (a != b)))
+        previous = row
+    length = max(len(expected), len(typed_n))
+    return DictationResult(score=(length - previous[-1]) / length if length else 1.0, ops=ops)

@@ -1,3 +1,5 @@
+import SceneInbox from "../components/SceneInbox";
+import LearnerProfileCard from "../components/LearnerProfileCard";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, BookOpen, BookmarkPlus, Brain, Clock3, Headphones, Layers3, Search, Sparkles, Target } from "lucide-react";
 import { useState } from "react";
@@ -16,7 +18,8 @@ import { formatPinyin } from "../lib/pinyin";
 import { usePrefs } from "../lib/prefs";
 
 export default function HomePage() {
-  const { data: stats, isLoading: statsLoading } = useDashboard();
+  const [population, setPopulation] = useState<"library" | "encountered">("library");
+  const { data: stats, isLoading: statsLoading } = useDashboard(population);
   const { data: library, isLoading: libraryLoading } = useLibrary();
   const { data: recs } = useRecommendations();
   const pinyinStyle = usePrefs((p) => p.pinyinStyle);
@@ -41,7 +44,7 @@ export default function HomePage() {
       <PageHeader
         eyebrow="Today’s immersion"
         title="Build Mandarin from real context"
-        description="Continue listening, retrieve a few saved words, and let repeated encounters—not isolated drills—guide what you learn next."
+        description="Explore real Mandarin, revisit useful words, and practise understanding with less support over time."
         actions={
           <>
             <Button asChild variant="outline"><Link to="/search"><Search />Search corpus</Link></Button>
@@ -49,6 +52,8 @@ export default function HomePage() {
           </>
         }
       />
+
+      <details className="rounded-xl border border-border bg-card/40 p-4"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Personalise your Mandarin practice</summary><LearnerProfileCard /></details>
 
       <section className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
         <Card className="relative overflow-hidden border-primary/15 bg-gradient-to-br from-primary/[0.11] via-card to-card">
@@ -60,7 +65,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent className="relative flex flex-wrap items-center gap-2 pt-2">
             {stats?.review_due ? <Button asChild><Link to="/review">Start a 3–10 minute review<ArrowRight /></Link></Button> : <Button disabled>No review due</Button>}
-            {!!stats?.graduated_waiting && <Button asChild variant="ghost"><Link to="/saved">{stats.graduated_waiting} ready for Anki</Link></Button>}
+            {!!stats?.graduated_waiting && <Button asChild variant="ghost"><Link to="/exports">{stats.graduated_waiting} awaiting Anki handoff</Link></Button>}
           </CardContent>
         </Card>
 
@@ -70,7 +75,7 @@ export default function HomePage() {
               <CardTitle className="text-sm">Learning activity</CardTitle>
               <Badge variant="secondary" className="text-[10px]">last 6 weeks</Badge>
             </div>
-            <CardDescription>Minutes of comprehensible input</CardDescription>
+            <CardDescription>Media minutes played · an activity estimate</CardDescription>
           </CardHeader>
           <CardContent className="pt-2">
             {statsLoading ? <Skeleton className="h-24 w-full" /> : weeks.length ? (
@@ -96,34 +101,35 @@ export default function HomePage() {
         </Card>
       </section>
 
+      <SceneInbox compact />
+
       {!!recs?.items.length && (
         <section>
           <SectionHeader
-            title={recs.fallback ? "Closest to your level" : "In your sweet spot"}
-            description={recs.fallback
-              ? "Your most familiar unfinished episodes — the sweet-spot picks sharpen as your known words grow"
-              : `Episodes ${Math.round(recs.band.low * 100)}–${Math.round(recs.band.high * 100)}% familiar — hard enough to grow on, easy enough to follow`}
+            title="Suggested samples"
+            description="Ranked by unfamiliar words, dense stretches, subtitle pace, your goal and optional ratings. Try 1–2 minutes to judge the fit."
           />
           <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
             {recs.items.map((rec) => (
-              <Link
-                key={rec.item_id}
-                to={`/watch/${rec.item_id}`}
-                className="group w-64 shrink-0 overflow-hidden rounded-2xl border border-border/70 bg-card/55 transition hover:border-primary/30"
-              >
-                <div className="relative aspect-video overflow-hidden bg-muted">
-                  <img src={rec.thumb_url} alt="" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
-                  <Badge className="absolute right-2 top-2 border-0 bg-black/70 text-[10px] text-teal-300">
-                    <Target className="size-3" /> {Math.round(rec.coverage * 100)}%
-                  </Badge>
-                </div>
-                <div className="px-3.5 py-2.5">
-                  <p className="truncate text-sm font-medium">{rec.title}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {rec.series_title ?? (rec.kind === "audio" ? "Podcast" : "Video")} · {rec.unknown_lexemes} words to learn
-                  </p>
-                </div>
-              </Link>
+              <article key={rec.item_id} className="w-72 shrink-0 overflow-hidden rounded-2xl border border-border/70 bg-card/55">
+                <Link to={`/watch/${rec.item_id}`} className="group block transition hover:bg-muted/30">
+                  <div className="relative aspect-video overflow-hidden bg-muted">
+                    <img src={rec.thumb_url} alt="" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
+                    <Badge className="absolute right-2 top-2 border-0 bg-black/80 text-[10px] text-teal-200"><Target className="size-3" />{Math.round(rec.coverage * 100)}% vocabulary familiarity</Badge>
+                  </div>
+                  <div className="space-y-1 px-3.5 py-3">
+                    <p className="truncate text-sm font-medium">{rec.title}</p>
+                    <p className="text-[11px] text-muted-foreground">{rec.series_title ?? (rec.kind === "audio" ? "Podcast" : "Video")} · {rec.unknown_lexemes} unmarked word types</p>
+                    {rec.unknowns_per_minute != null && <p className="text-xs text-foreground/80">{rec.unknowns_per_minute} unfamiliar occurrences/min</p>}
+                  </div>
+                </Link>
+                <details className="border-t border-border px-3.5 text-xs"><summary className="min-h-11 cursor-pointer py-3">Why this sample?</summary>
+                  <ul className="mb-3 list-disc space-y-2 pl-4 text-muted-foreground">{rec.reasons?.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                  {rec.subtitle_characters_per_minute != null && <p className="mb-2 text-muted-foreground">Subtitle pace: {rec.subtitle_characters_per_minute} characters/min of cue time. Source: {rec.subtitle_source}.</p>}
+                  {rec.source_warning && <p className="mb-2 text-amber-200">Automatic or unverified source; check the transcript against the audio.</p>}
+                  <p className="mb-3 leading-relaxed text-muted-foreground">{rec.uncertainty ?? "Vocabulary familiarity is an estimate, not measured comprehension."} Ignored words are excluded from the vocabulary percentage.</p>
+                </details>
+              </article>
             ))}
           </div>
         </section>
@@ -138,15 +144,30 @@ export default function HomePage() {
         </section>
       )}
 
+      <Card>
+        <CardHeader><CardTitle className="text-base">Practice evidence</CardTitle><CardDescription>Last 8 weeks · task-specific results, with no combined mastery score</CardDescription></CardHeader>
+        <CardContent className="space-y-3">
+          {!stats?.practice_evidence?.length && <p className="text-sm text-muted-foreground">Review and dictation results will appear here. Playing media alone records exposure.</p>}
+          <div className="grid gap-3 sm:grid-cols-2">{stats?.practice_evidence?.map((evidence) => <div key={`${evidence.task}:${evidence.method}:${evidence.assistance}`} className="rounded-lg border border-border p-3 text-sm"><p className="font-medium capitalize">{evidence.task.replaceAll("_", " ")}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{evidence.attempts} attempts · {evidence.method === "self_report" ? "self-reported result" : evidence.method === "automatic_edit_distance" ? "automatic character matching" : evidence.method === "curated_answer_key" ? "curated example key · practice" : "local learner-authored key · unvalidated"} · assistance: {evidence.assistance.replaceAll("_", " ")}</p><p className="mt-2 text-xs">{Math.round(evidence.mean_score*100)}% average {evidence.method === "self_report" ? evidence.task === "scene_meaning_reflection" ? "self-reported understanding" : "reported recall" : evidence.method === "automatic_edit_distance" ? "transcription accuracy" : "answer-key agreement"}</p></div>)}</div>
+          {!!stats?.excluded_question_results && <p className="text-xs leading-relaxed text-amber-200">{stats.excluded_question_results} reported-question results are excluded from these averages. Original attempts remain in the audit history.</p>}
+          <p className="text-xs leading-relaxed text-muted-foreground">These results reflect practised material. Listening comprehension, pronunciation and spontaneous production require separate assessment. Lookups can signal curiosity or a new meaning.</p>
+        </CardContent>
+      </Card>
+
       <section className="grid gap-4 md:grid-cols-3">
         <MetricCard icon={<Layers3 />} label="Sentences played" value={stats?.totals.sentences_played} hint="context encounters" loading={statsLoading} />
         <MetricCard icon={<Sparkles />} label="Words explored" value={stats?.totals.lookups} hint="dictionary lookups" loading={statsLoading} />
         <MetricCard icon={<Clock3 />} label="Items saved" value={stats?.totals.saves} hint="in your learning queue" loading={statsLoading} />
       </section>
 
-      {!!stats?.recurring_unknowns.length && (
+      {stats && (
         <section>
-          <SectionHeader title="Words following you around" description="Unknown words recurring across multiple sources are usually worth noticing" />
+          <SectionHeader title="Words to explore" description={population === "library" ? "Unmarked or learning words across your indexed library. Indexing does not mean you have encountered them." : "Words with recorded playback since the evidence update. Counts below describe their indexed library occurrences."} />
+          <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Word population">
+            <Button className="min-h-11" variant={population === "library" ? "default" : "outline"} aria-pressed={population === "library"} onClick={() => setPopulation("library")}>In your library</Button>
+            <Button className="min-h-11" variant={population === "encountered" ? "default" : "outline"} aria-pressed={population === "encountered"} onClick={() => setPopulation("encountered")}>You have encountered</Button>
+          </div>
+          {!stats.recurring_unknowns.length && <p role="status" className="py-4 text-sm text-muted-foreground">No words in this population yet. Playback records exposure; common beginner words remain eligible.</p>}
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {stats.recurring_unknowns.map((word) => (
               <div key={word.lexeme_id} className="group flex items-center gap-3 rounded-xl border border-border/70 bg-card/55 px-3.5 py-3 transition hover:border-primary/30 hover:bg-card">
@@ -154,7 +175,7 @@ export default function HomePage() {
                   <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/8 font-zh text-xl text-foreground">{word.simplified}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-stone-300">{formatPinyin(word.pinyin, pinyinStyle) || "Recurring word"}</span>
-                    <span className="text-[11px] text-muted-foreground">{word.occurrences} encounters in {word.items} sources</span>
+                    <span className="text-[11px] text-muted-foreground">{word.occurrences} indexed occurrences in {word.items} sources</span>
                   </span>
                 </Link>
                 <Button
@@ -178,9 +199,9 @@ export default function HomePage() {
         <div className="flex size-10 items-center justify-center rounded-xl bg-amber-400/10 text-amber-300"><Headphones className="size-5" /></div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">Anki bridge</p>
-          <p className="text-xs text-muted-foreground">{stats?.anki.last_import ? `Known words last synchronized ${String((stats.anki.last_import as { at?: string })?.at ?? "").slice(0, 10)}` : "Open Anki Desktop, then import known words from Admin."}</p>
+          <p className="text-xs text-muted-foreground">{stats?.anki.last_import ? `Anki vocabulary last synchronized ${String((stats.anki.last_import as { at?: string })?.at ?? "").slice(0, 10)}` : "Open Anki Desktop, then import known words from Admin."}</p>
         </div>
-        <Button asChild variant="outline" size="sm"><Link to="/saved">Review export queue</Link></Button>
+        <Button asChild variant="outline" size="sm"><Link to="/exports">Review export queue</Link></Button>
       </Card>
     </Page>
   );

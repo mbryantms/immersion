@@ -5,13 +5,17 @@ sentence instead of redoing the episode (podreader was all-or-nothing)."""
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
+import weakref
+from contextlib import contextmanager
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import AiArtifact, MediaItem, Sentence
+from ..models import AiArtifact, Event, MediaItem, Sentence, Setting
+from .validation import InvalidExplanation, validate_result, validate_translations
 from . import provider
 
 BATCH = 25
@@ -24,10 +28,9 @@ sentence, same order, no commentary.
 {numbered}"""
 
 
-EXPLAIN_PROMPT_VERSION = "3"
-# The explanation is generated as two halves run in PARALLEL (CLI latency is
-# dominated by output length, so halving each call's output roughly halves the
-# wall clock) and the UI renders core as soon as it lands.
+EXPLAIN_PROMPT_VERSION = "4"
+# Core and extras are separate, validated artifacts. The UI explicitly requests
+# core before extras; cancelled work cannot chain speculative generations.
 EXPLAIN_CORE_PROMPT = """You are helping an intermediate Mandarin learner deeply understand ONE
 sentence from something they are watching. Be concrete and concise; no praise,
 no filler. Facts they can see (pinyin, HSK levels, dictionary glosses) are
@@ -100,14 +103,15 @@ def _merge_breakdown(ai_words: list[dict], zh_tokens: list[dict], lex_by_id: dic
             j += 1
         if acc == text:
             i = j
-        else:  # AI drifted from the given tokens: loose containment fallback
-            toks = [w for w in zh_tokens if w["t"] and w["t"] in text]
+        else:
+            raise InvalidExplanation("Breakdown drifted from adjacent source tokens")
         entry: dict = {"zh": text, "role": chunk.get("role") or chunk.get("note") or ""}
         if toks:
             entry["py"] = " ".join("".join(t.get("py", [])) for t in toks)
             levels = [
                 lex_by_id[t["lex"]].hsk_level
-                for t in toks if t.get("lex") in lex_by_id and lex_by_id[t["lex"]].hsk_level
+                for t in toks
+                if t.get("lex") in lex_by_id and lex_by_id[t["lex"]].hsk_level
             ]
             if levels:
                 entry["hsk"] = max(levels)
@@ -122,16 +126,56 @@ def _merge_breakdown(ai_words: list[dict], zh_tokens: list[dict], lex_by_id: dic
     return out
 
 
-# One generation per (artifact_type, zh) at a time: a speculative prefetch and
-# an Explain click for the same sentence coalesce instead of both paying the
-# provider. Locks are tiny and never removed — the working set is small.
-_inflight: dict[str, threading.Lock] = {}
+class ExplanationRejected(RuntimeError):
+    def __init__(self, artifact_id):
+        self.artifact_id = artifact_id
+        super().__init__("Explanation was rejected")
+
+
+class ExplanationChanged(RuntimeError):
+    pass
+
+
+_inflight = weakref.WeakValueDictionary()
 _inflight_guard = threading.Lock()
 
 
-def _flight_lock(key: str) -> threading.Lock:
+@contextmanager
+def _flight_lock(key):
     with _inflight_guard:
-        return _inflight.setdefault(key, threading.Lock())
+        lock = _inflight.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _inflight[key] = lock
+    while not lock.acquire(timeout=0.1):
+        provider.check_cancelled()
+    try:
+        provider.check_cancelled()
+        yield
+    finally:
+        lock.release()
+
+
+def explanation_context(sentence):
+    context = {
+        "zh": sentence.zh,
+        "en": sentence.en,
+        "analysis": sentence.analysis,
+        "model": settings.ai_model,
+        "prompt_version": EXPLAIN_PROMPT_VERSION,
+    }
+    return hashlib.sha256(
+        json.dumps(context, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()
+
+
+def retry_key(kind, context_hash):
+    return f"ai-generation:{kind}:{context_hash}"
+
+
+def generation_state(session, kind, context_hash):
+    row = session.get(Setting, retry_key(kind, context_hash))
+    return int((row.value or {}).get("generation", 0)) if row else 0
 
 
 def _explain_context(session: Session, sentence: Sentence):
@@ -140,75 +184,132 @@ def _explain_context(session: Session, sentence: Sentence):
     words = (sentence.analysis or {}).get("words", [])
     zh_tokens = [w for w in words if w.get("type") == "zh"]
     lex_ids = [w["lex"] for w in zh_tokens if w.get("lex")]
-    lex_by_id = {
-        lex.id: lex
-        for lex in session.scalars(select(Lexeme).where(Lexeme.id.in_(lex_ids)))
-    } if lex_ids else {}
+    lex_by_id = (
+        {lex.id: lex for lex in session.scalars(select(Lexeme).where(Lexeme.id.in_(lex_ids)))}
+        if lex_ids
+        else {}
+    )
     return words, zh_tokens, lex_by_id
 
 
-def _cached_artifact(session: Session, artifact_type: str, input_hash: str) -> AiArtifact | None:
+def _cached_artifact(session, artifact_type, input_hash):
     return session.scalar(
-        select(AiArtifact).where(
+        select(AiArtifact)
+        .where(
             AiArtifact.target_kind == "sentence",
             AiArtifact.artifact_type == artifact_type,
             AiArtifact.input_hash == input_hash,
             AiArtifact.prompt_version == EXPLAIN_PROMPT_VERSION,
         )
+        .order_by(AiArtifact.id)
+        .limit(1)
     )
 
 
-def _explain(session: Session, sentence: Sentence, artifact_type: str, prompt: str, required_key: str) -> AiArtifact:
-    """Cached, single-flight AI explanation half; the cache key is the zh text,
-    so re-ingested episodes reuse explanations for unchanged sentences. The AI
-    is grounded on the app's own tokenization; pinyin/HSK/POS/glosses are
-    merged in from the analysis + lexicon rather than generated."""
-    input_hash = hashlib.sha256(sentence.zh.encode()).hexdigest()[:16]
-    cached = _cached_artifact(session, artifact_type, input_hash)
-    if cached is not None:
-        return cached
+def _explain(
+    session: Session,
+    sentence: Sentence,
+    artifact_type: str,
+    prompt: str,
+    required_key: str,
+) -> AiArtifact:
+    context_hash = explanation_context(sentence)
+    generation = generation_state(session, artifact_type, context_hash)
+    input_hash = hashlib.sha256(f"{context_hash}:{generation}".encode()).hexdigest()
 
+    def cached():
+        artifact = _cached_artifact(session, artifact_type, input_hash)
+        if artifact is not None and artifact.accepted is False:
+            raise ExplanationRejected(artifact.id)
+        return artifact
+
+    existing = cached()
+    if existing is not None:
+        return existing
     with _flight_lock(f"{artifact_type}:{input_hash}"):
-        cached = _cached_artifact(session, artifact_type, input_hash)  # won the wait, not the race
-        if cached is not None:
-            return cached
-
+        existing = cached()
+        if existing is not None:
+            return existing
+        if not provider.available():
+            raise provider.ProviderUnavailable("Optional AI provider is unavailable")
         words, zh_tokens, lex_by_id = _explain_context(session, sentence)
-        en_line = f"Track translation (context, may be loose): {sentence.en}\n" if sentence.en else ""
+        en_line = (
+            f"{sentence.en_source or 'Unknown source'} translation (may be loose): {sentence.en}\n"
+            if sentence.en
+            else ""
+        )
         result = provider.complete_json(
             prompt.format(
                 zh=sentence.zh,
-                tokens=" | ".join(w["t"] for w in zh_tokens) or sentence.zh,
+                tokens=" | ".join(word["t"] for word in zh_tokens) or sentence.zh,
                 en_line=en_line,
             ),
             timeout_s=180,
         )
-        if not isinstance(result, dict) or required_key not in result:
-            raise RuntimeError(f"malformed explanation payload: {str(result)[:200]}")
-
+        provider.check_cancelled()
+        # Refresh after the long provider call. A concurrent local correction must
+        # win; never publish an explanation generated for an older source revision.
+        session.refresh(sentence)
+        if explanation_context(sentence) != context_hash:
+            session.add(
+                Event(
+                    type="ai_output_discarded",
+                    sentence_id=sentence.id,
+                    data={
+                        "reason": "source_changed",
+                        "context_hash": context_hash,
+                        "artifact_type": artifact_type,
+                    },
+                )
+            )
+            session.commit()
+            raise ExplanationChanged(
+                "The source changed while AI was running. Reload before trying again"
+            )
+        try:
+            result = validate_result(artifact_type, result, zh_tokens)
+        except InvalidExplanation as error:
+            # Do not cache malformed output as a usable explanation or expose it.
+            session.add(
+                Event(
+                    type="ai_output_rejected",
+                    sentence_id=sentence.id,
+                    data={
+                        "reason": str(error),
+                        "context_hash": context_hash,
+                        "artifact_type": artifact_type,
+                    },
+                )
+            )
+            session.commit()
+            raise
         if artifact_type == "explanation":
-            result["words"] = _merge_breakdown(result.get("words") or [], zh_tokens, lex_by_id)
+            result["words"] = _merge_breakdown(result["words"], zh_tokens, lex_by_id)
             result["pinyin"] = _sentence_pinyin(words)
             levels = [lex.hsk_level for lex in lex_by_id.values() if lex.hsk_level]
             result["hsk"] = {
                 "level": max(levels) if levels else None,
                 "offlist": [
-                    lex.simplified for lex in lex_by_id.values()
+                    lex.simplified
+                    for lex in lex_by_id.values()
                     if lex.hsk_level is None and lex.is_dict
                 ],
             }
         else:
-            for ex in (result.get("pattern") or {}).get("examples") or []:
-                if ex.get("zh"):
-                    ex["py"] = _tts_pinyin(ex["zh"])
-            for var in result.get("variations") or []:
-                if var.get("zh"):
-                    var["py"] = _tts_pinyin(var["zh"])
-
+            for example in (result.get("pattern") or {}).get("examples", []):
+                example["py"] = _tts_pinyin(example["zh"])
+            for variation in result["variations"]:
+                variation["py"] = _tts_pinyin(variation["zh"])
+        result["_context_hash"] = context_hash
+        result["_generation"] = generation
         artifact = AiArtifact(
-            target_kind="sentence", target_id=sentence.id, artifact_type=artifact_type,
-            provider="claude-cli", model=settings.ai_model,
-            prompt_version=EXPLAIN_PROMPT_VERSION, input_hash=input_hash,
+            target_kind="sentence",
+            target_id=sentence.id,
+            artifact_type=artifact_type,
+            provider="claude-cli",
+            model=settings.ai_model,
+            prompt_version=EXPLAIN_PROMPT_VERSION,
+            input_hash=input_hash,
             output=result,
         )
         session.add(artifact)
@@ -228,12 +329,19 @@ def translate_item(session: Session, item_id: int, progress=lambda msg: None) ->
     item = session.get(MediaItem, item_id)
     if item is None:
         return {"skipped": True}
+    policy_row = session.get(Setting, "ai-policy")
+    if policy_row and not (policy_row.value or {}).get("enabled", True):
+        return {"skipped": "AI generation disabled"}
     if not provider.available():
         return {"skipped": "claude CLI not available; sentences stay untranslated"}
 
     todo = session.scalars(
         select(Sentence)
-        .where(Sentence.item_id == item_id, Sentence.en.is_(None))
+        .where(
+            Sentence.item_id == item_id,
+            Sentence.en.is_(None),
+            Sentence.en_source.is_(None) | (Sentence.en_source != "user"),
+        )
         .order_by(Sentence.ordinal)
     ).all()
     done = 0
@@ -241,22 +349,67 @@ def translate_item(session: Session, item_id: int, progress=lambda msg: None) ->
         chunk = todo[i : i + BATCH]
         progress(f"translating {i + len(chunk)}/{len(todo)}")
         numbered = "\n".join(f"{j + 1}. {s.zh}" for j, s in enumerate(chunk))
-        result = provider.complete_json(PROMPT.format(numbered=numbered))
-        if not isinstance(result, list) or len(result) != len(chunk):
-            raise RuntimeError(
-                f"translation count mismatch: {len(chunk)} sent, "
-                f"{len(result) if isinstance(result, list) else type(result)} back"
-            )
+        from ..models import SentenceIdentity
+
+        expected = dict(
+            session.execute(
+                select(SentenceIdentity.id, SentenceIdentity.revision).where(
+                    SentenceIdentity.id.in_([sentence.id for sentence in chunk])
+                )
+            ).all()
+        )
+        session.expire_all()
+        policy_row = session.get(Setting, "ai-policy")
+        if policy_row and not (policy_row.value or {}).get("enabled", True):
+            break
+        with provider.request_scope(priority="background"):
+            result = provider.complete_json(PROMPT.format(numbered=numbered))
+        result = validate_translations(result, len(chunk))
+        translated = 0
         for s, en in zip(chunk, result):
+            from ..corrections import identity_for
+            from sqlalchemy import update
+
+            identity = identity_for(session, s)
+            revision = expected.get(s.id, 0)
+            claimed = session.execute(
+                update(SentenceIdentity)
+                .where(SentenceIdentity.id == s.id, SentenceIdentity.revision == revision)
+                .values(revision=revision + 1)
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount != 1:
+                session.expire(s)
+                continue  # A local edit made while the provider was running wins.
             s.en = str(en)
             s.en_source = "ai"
-            session.add(AiArtifact(
-                target_kind="sentence", target_id=s.id, artifact_type="translation",
-                provider="claude-cli", model=settings.ai_model,
-                prompt_version=PROMPT_VERSION,
-                input_hash=hashlib.sha256(s.zh.encode()).hexdigest()[:16],
-                output={"en": s.en},
-            ))
+            identity.source = {**identity.source, "en": s.en, "en_source": "ai"}
+            identity.revision = revision + 1
+            translated += 1
+            session.add(
+                AiArtifact(
+                    target_kind="sentence",
+                    target_id=s.id,
+                    artifact_type="translation",
+                    provider="claude-cli",
+                    model=settings.ai_model,
+                    prompt_version=PROMPT_VERSION,
+                    input_hash=hashlib.sha256(s.zh.encode()).hexdigest()[:16],
+                    output={"en": s.en},
+                )
+            )
+        from sqlalchemy import text
+
+        for s in chunk:
+            session.execute(
+                text("UPDATE sentence_fts SET en = :en WHERE rowid = :id"),
+                {"en": s.en, "id": s.id},
+            )
+        session.refresh(item, attribute_names=["meta"])
+        item.meta = {
+            **(item.meta or {}),
+            "analysis_rev": (item.meta or {}).get("analysis_rev", 0) + 1,
+        }
         session.commit()  # per-batch checkpoint: retries resume where en is NULL
-        done += len(chunk)
+        done += translated
     return {"translated": done, "already_done": len(todo) == 0}

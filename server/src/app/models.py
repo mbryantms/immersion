@@ -1,6 +1,7 @@
 """Domain model. Single-household deployment: no users table — adding one later
-is a single boring migration. Original media and subtitle text are immutable;
-derived analysis lives in sentence.analysis (render payload) plus
+is a single boring migration. Original media/subtitle files stay immutable; source snapshots live in
+sentence_identity and local edits project into sentence. Analysis lives in
+sentence.analysis (render payload) plus
 token_occurrence rows (coverage/concordance queries)."""
 
 from __future__ import annotations
@@ -98,7 +99,7 @@ class Sentence(Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))
     track_id: Mapped[int] = mapped_column(ForeignKey("text_track.id"))
     ordinal: Mapped[int] = mapped_column(Integer)
-    zh: Mapped[str] = mapped_column(Text)  # original text, never mutated
+    zh: Mapped[str] = mapped_column(Text)  # current projection; original is in sentence_identity.source
     trad: Mapped[str | None] = mapped_column(Text)  # OpenCC/CEDICT conversion
     t0_ms: Mapped[int] = mapped_column(Integer)
     t1_ms: Mapped[int] = mapped_column(Integer)
@@ -109,12 +110,39 @@ class Sentence(Base):
     __table_args__ = (Index("ix_sentence_item_ord", "item_id", "ordinal"),)
 
 
+class SentenceIdentity(Base):
+    """Permanent identity and source snapshot. Never deleted or reused."""
+    __tablename__ = "sentence_identity"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("media_item.id"), index=True)
+    track_id: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[dict] = mapped_column(JSON, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    overrides: Mapped[dict | None] = mapped_column(JSON)
+    __table_args__ = {"sqlite_autoincrement": True}
+
+
+class SentenceCorrection(Base):
+    __tablename__ = "sentence_correction"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sentence_id: Mapped[int] = mapped_column(ForeignKey("sentence_identity.id"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String)
+    overrides: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint("sentence_id", "revision"),)
+
+
 class TokenOccurrence(Base):
     __tablename__ = "token_occurrence"
     sentence_id: Mapped[int] = mapped_column(ForeignKey("sentence.id"), primary_key=True)
     idx: Mapped[int] = mapped_column(Integer, primary_key=True)  # word index within sentence
     item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))  # denormalized for coverage
     surface: Mapped[str] = mapped_column(String)
+    start_offset: Mapped[int | None] = mapped_column(Integer)  # Unicode codepoints, half-open
+    end_offset: Mapped[int | None] = mapped_column(Integer)
+    canonical: Mapped[str | None] = mapped_column(String)
+    reading: Mapped[str | None] = mapped_column(String)
     lexeme_id: Mapped[int] = mapped_column(ForeignKey("lexeme.id"))
     __table_args__ = (
         Index("ix_tokocc_lexeme", "lexeme_id"),
@@ -179,7 +207,7 @@ class KnowledgeState(Base):
     __tablename__ = "knowledge_state"
     lexeme_id: Mapped[int] = mapped_column(ForeignKey("lexeme.id"), primary_key=True)
     state: Mapped[str] = mapped_column(String)  # new|learning|familiar|known|ignored
-    # familiar = derived from passive exposure (derive.py); any lookup demotes
+    # familiar = exposure estimate; retrieval evidence remains task-specific
     source: Mapped[str] = mapped_column(String)  # manual|anki|derived — manual > anki > derived
     anki_interval_days: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -203,12 +231,16 @@ class SavedItem(Base):
     kind: Mapped[str] = mapped_column(String)  # 'word' | 'sentence'
     lexeme_id: Mapped[int | None] = mapped_column(ForeignKey("lexeme.id"))
     surface: Mapped[str | None] = mapped_column(String)  # as saved (custom spans differ from lexeme)
+    selected_reading: Mapped[str | None] = mapped_column(String)
+    selected_meaning: Mapped[str | None] = mapped_column(Text)
+    export_deferred: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    selection_source: Mapped[str | None] = mapped_column(String)
     note: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSON)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     contexts: Mapped[list[SavedContext]] = relationship(back_populates="saved_item")
-    __table_args__ = (Index("ix_saved_lexeme", "lexeme_id"),)
+    __table_args__ = (Index("ix_saved_lexeme", "lexeme_id"), Index("ix_saved_export_inbox", "archived", "export_deferred", "id"))
 
 
 class SavedContext(Base):
@@ -240,7 +272,7 @@ class ReviewState(Base):
     streak: Mapped[int] = mapped_column(Integer, default=0)  # consecutive passes
     graduated: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    __table_args__ = (Index("ix_review_due", "due_at"),)
+    __table_args__ = (Index("ix_review_due", "due_at"), Index("ix_review_graduated_saved", "graduated", "saved_item_id"))
 
 
 class Event(Base):
@@ -259,7 +291,8 @@ class Event(Base):
     study_mode: Mapped[str | None] = mapped_column(String)
     data: Mapped[dict | None] = mapped_column(JSON)
     client_uuid: Mapped[str | None] = mapped_column(String, unique=True)  # idempotent batch replay
-    __table_args__ = (Index("ix_event_ts", "ts"), Index("ix_event_lexeme", "lexeme_id"))
+    __table_args__ = (Index("ix_event_ts", "ts"), Index("ix_event_lexeme", "lexeme_id"),
+                     Index("ix_event_type_study_ts", "type", "study_mode", "ts"))
 
 
 class PlaybackProgress(Base):
@@ -283,6 +316,7 @@ class AnkiLink(Base):
     fields_hash: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="exported")
     exported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_anki_link_saved", "saved_item_id"),)
 
 
 class AnkiSentence(Base):
@@ -336,3 +370,82 @@ class Setting(Base):
     __tablename__ = "setting"
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON)
+
+
+class LexemeExposure(Base):
+    """One independent exposure per lexeme/source/UTC day; loops remain events."""
+    __tablename__ = "lexeme_exposure"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lexeme_id: Mapped[int] = mapped_column(ForeignKey("lexeme.id"))
+    item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))
+    day: Mapped[str] = mapped_column(String)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    task: Mapped[str] = mapped_column(String)
+    event_id: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (UniqueConstraint("lexeme_id", "item_id", "day"),
+                     Index("ix_exposure_lexeme", "lexeme_id"))
+
+
+class LearningEvidence(Base):
+    """Observed performance, never a claim of whole-word mastery."""
+    __tablename__ = "learning_evidence"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(Integer, unique=True)
+    lexeme_id: Mapped[int | None] = mapped_column(ForeignKey("lexeme.id"))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    task: Mapped[str] = mapped_column(String)
+    method: Mapped[str] = mapped_column(String)
+    assistance: Mapped[str] = mapped_column(String)
+    score: Mapped[float] = mapped_column(Float)
+    valid_for_summary: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    scope: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = (Index("ix_evidence_lexeme_ts", "lexeme_id", "ts"),)
+
+
+class GuidedScene(Base):
+    """A source snapshot and resumable, revision-protected learning cycle."""
+    __tablename__ = "guided_scene"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_uuid: Mapped[str] = mapped_column(String, unique=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id"))
+    goal: Mapped[str] = mapped_column(String)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    stage: Mapped[str] = mapped_column(String, default="watch")
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    support: Mapped[dict] = mapped_column(JSON, default=dict)
+    revisits: Mapped[int] = mapped_column(Integer, default=0)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_guided_scene_due", "due_at"),)
+
+
+class SceneQuestion(Base):
+    """An explicitly reviewed local answer key; reporting suspends future use."""
+    __tablename__ = "scene_question"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scene_id: Mapped[int] = mapped_column(ForeignKey("guided_scene.id"))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String, default="active")
+    body: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_scene_question_scene", "scene_id"),)
+
+
+class ExportAttempt(Base):
+    """Immutable submitted fields/destination, with recoverable per-note delivery state."""
+    __tablename__ = "export_attempt"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("job.id"))
+    saved_item_id: Mapped[int | None] = mapped_column(ForeignKey("saved_item.id", ondelete="SET NULL"))
+    original_saved_item_id: Mapped[int] = mapped_column(Integer)
+    export_key: Mapped[str] = mapped_column(String)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String, default="queued")
+    note_id: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (Index("ix_export_attempt_saved", "saved_item_id", "id"),
+                     Index("ix_export_attempt_job", "job_id"))

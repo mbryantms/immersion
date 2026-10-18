@@ -1,10 +1,9 @@
-"""Export mined items to Anki. Reuses the "Xiehanzi Mandarin" note type
-(templates/styling already render it) into a Mined::Immersion deck.
+"""Canonical export fields and bounded media builders.
 
-Two halves: build_preview is fast and side-effect-free (field building + dup
-detection across the whole collection) and runs in the API process; export
-committed items runs as a worker job because media generation (ffmpeg cue
-clips, frame grabs, edge-tts word audio) takes seconds per item."""
+The application's current API/worker handoff lives in profile.py and handoff.py.
+The older build_preview/export_items helpers remain for legacy regression
+coverage; current routes and job handlers never submit through that path.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import AnkiLink, Lexeme, MediaItem, MediaRoot, SavedItem, Sentence, Setting
+from ..timing import effective_times
 from .connect import AnkiError, ac
 
 NOTE_TYPE = "Xiehanzi Mandarin"
@@ -64,35 +64,53 @@ def _fields(session: Session, item: SavedItem) -> tuple[dict, dict]:
 
     if item.kind == "word" and item.lexeme_id:
         lex = session.get(Lexeme, item.lexeme_id)
-        simplified = item.surface or lex.simplified
+        simplified = lex.simplified
         traditional = lex.traditional or ""
-        pinyin = _marks(simplified)
+        from pypinyin.contrib.tone_convert import to_tone
+        context_words = ((sentence.analysis if sentence else (snap or {}).get("analysis")) or {}).get("words", [])
+        occurrence_start = (snap or {}).get("occurrence_start")
+        contextual_reading = next((w.get("reading") for w in context_words
+                                   if w.get("lex") == item.lexeme_id and w.get("reading")
+                                   and (occurrence_start is None or w.get("start") == occurrence_start)), None)
+        reading = item.selected_reading or contextual_reading
+        pinyin = (" ".join(to_tone(s) for s in reading.split()) if reading else _marks(simplified))
         from ..lingua.cedict import load as load_cedict
 
         gl = load_cedict().gloss(simplified) or []
-        meaning = "; ".join(d for g in gl for d in g.get("defs", []))[:500]
+        contextual_meaning = next((w.get("meaning") for w in context_words if w.get("lex") == item.lexeme_id and (occurrence_start is None or w.get("start") == occurrence_start)), None)
+        meaning = item.selected_meaning or contextual_meaning or "; ".join(d for g in gl for d in g.get("defs", []))[:500]
     else:
-        simplified = item.surface or zh
+        simplified = zh or item.surface or ""
         traditional = ""
         pinyin = _marks(simplified)
         meaning = en
 
+    words = ((sentence.analysis if sentence else (snap or {}).get("analysis")) or {}).get("words", [])
+    sentence_pinyin = " ".join(" ".join(w.get("py", [w["t"]])) for w in words) if words else _marks(zh)
+    if item.selected_reading and words:
+        from pypinyin.contrib.tone_convert import to_tone
+        start = (snap or {}).get("occurrence_start")
+        sentence_pinyin = " ".join(
+            " ".join(to_tone(s) for s in item.selected_reading.split())
+            if w.get("lex") == item.lexeme_id and (start is None or w.get("start") == start)
+            else " ".join(w.get("py", [w["t"]])) for w in words)
     media_item = session.get(MediaItem, sentence.item_id) if sentence else None
+    t0, t1 = effective_times(session, sentence) if sentence else (0, 0)
     return (
         {
-            "ID": _note_id(simplified),
+            "ID": (_note_id(simplified) + ("-s" + hashlib.sha256(f"{item.selected_reading}:{item.selected_meaning}".encode()).hexdigest()[:10] if item.selected_reading or item.selected_meaning else "")),
             "Simplified": simplified,
             "Traditional": traditional,
             "Pinyin": pinyin,
             "Meaning": meaning,
             "Sentence": zh,
             "SentenceTraditional": (sentence.trad if sentence else None) or "",
-            "SentencePinyin": _marks(zh),
+            "SentencePinyin": sentence_pinyin,
             "SentenceMeaning": en,
         },
         {
             "sentence_id": sentence.id if sentence else None,
-            "can_clip": bool(sentence and media_item and media_item.available and sentence.t1_ms > sentence.t0_ms),
+            "can_clip": bool(sentence and media_item and media_item.available and t1 > t0),
             "can_image": bool(media_item and media_item.kind == "video" and media_item.available),
         },
     )
@@ -152,7 +170,7 @@ def _clip(src: Path, t0_ms: int, t1_ms: int) -> bytes:
         subprocess.run(
             ["ffmpeg", "-loglevel", "error", "-ss", f"{t0:.3f}", "-to", f"{t1:.3f}",
              "-i", str(src), "-vn", "-c:a", "libmp3lame", "-b:a", "96k", "-y", f.name],
-            check=True,
+            check=True, timeout=90,
         )
         return Path(f.name).read_bytes()
 
@@ -162,7 +180,7 @@ def _frame(src: Path, t_ms: int) -> bytes:
         subprocess.run(
             ["ffmpeg", "-loglevel", "error", "-ss", f"{t_ms / 1000:.3f}", "-i", str(src),
              "-frames:v", "1", "-vf", "scale=640:-2", "-y", f.name],
-            check=True,
+            check=True, timeout=90,
         )
         return Path(f.name).read_bytes()
 
@@ -177,7 +195,7 @@ def _tts(word: str) -> bytes:
                 chunks.append(chunk["data"])
         return b"".join(chunks)
 
-    return asyncio.run(run())
+    return asyncio.run(asyncio.wait_for(run(), timeout=20))
 
 
 def _store(filename: str, data: bytes) -> str:
@@ -210,16 +228,19 @@ def export_items(session: Session, entries: list[dict], progress=lambda msg: Non
         if entry.get("include_media", True) and sentence is not None:
             src = _media_source(session, sentence)
             stem = f"immersion-{item.id}"
-            if src is not None and sentence.t1_ms > sentence.t0_ms:
+            t0, t1 = effective_times(session, sentence)
+            if src is not None and t1 > t0:
                 if "SentenceAudio" in model_fields:
-                    fields["SentenceAudio"] = _store(f"{stem}-sentence.mp3", _clip(src, sentence.t0_ms, sentence.t1_ms))
+                    fields["SentenceAudio"] = _store(f"{stem}-sentence.mp3", _clip(src, t0, t1))
                 media_item = session.get(MediaItem, sentence.item_id)
                 if image_field and media_item and media_item.kind == "video":
-                    mid = (sentence.t0_ms + sentence.t1_ms) // 2
+                    mid = (t0 + t1) // 2
                     data = _frame(src, mid)
                     ac("storeMediaFile", filename=f"{stem}-frame.jpg", data=base64.b64encode(data).decode())
                     fields[image_field] = f'<img src="{stem}-frame.jpg">'
-            if item.kind == "word" and "Audio" in model_fields:
+            user_reading = any(word.get("lex") == item.lexeme_id and word.get("reading_source") == "user"
+                               for word in (sentence.analysis or {}).get("words", []))
+            if item.kind == "word" and not item.selected_reading and not user_reading and "Audio" in model_fields:
                 try:
                     fields["Audio"] = _store(f"{stem}-word.mp3", _tts(fields.get("Simplified", "")))
                 except Exception:

@@ -3,14 +3,15 @@
 from app.lingua.diff import lcs_ops, norm_zh, score_attempt
 
 
-def test_norm_keeps_only_cjk():
-    assert norm_zh("大家好！Hello, 你们 好。") == "大家好你们好"
+def test_norm_keeps_names_and_numbers():
+    assert norm_zh("大家好！Hello, 你们 好。１２") == "大家好hello你们好12"
 
 
 def test_perfect_and_empty():
     assert score_attempt("大家好。", "大家好").score == 1.0
     assert score_attempt("大家好。", "").score == 0.0
-    assert score_attempt("！！", "whatever").score == 1.0  # nothing to hear
+    assert score_attempt("！！", "whatever").score == 0.0
+    assert score_attempt("！！", "").score == 1.0
 
 
 def test_missing_and_extra_chars():
@@ -19,7 +20,7 @@ def test_missing_and_extra_chars():
     assert ("del", "家") in r.ops
 
     r = score_attempt("大家好", "大家很好")
-    assert r.score == 1.0
+    assert r.score == 0.75
     assert ("ins", "很") in r.ops
 
 

@@ -42,6 +42,17 @@ def first_int(name: str) -> int | None:
     return int(m.group()) if m else None
 
 
+def episode_number(stem: str) -> int | None:
+    """Prefer explicit episode markers; dates/multiple unrelated numbers are ambiguous."""
+    explicit = re.search(r"(?:episode|ep)[ _.-]*(\d+)|第\s*(\d+)\s*[集期课課]", stem, re.IGNORECASE)
+    if explicit:
+        return int(next(value for value in explicit.groups() if value is not None))
+    numbers = re.findall(r"\d+", stem)
+    if len(numbers) == 1 and not (len(numbers[0]) == 4 and 1900 <= int(numbers[0]) <= 2100):
+        return int(numbers[0])
+    return None
+
+
 def find_cover(showdir: Path) -> Path | None:
     return next((showdir / n for n in COVER_NAMES if (showdir / n).exists()), None)
 
@@ -60,6 +71,8 @@ def read_transcript(path: Path) -> str:
 
 def scan_podcast_root(session: Session, root: MediaRoot, progress=lambda msg: None) -> dict:
     base = Path(root.path)
+    if not base.is_dir():
+        raise RuntimeError(f"Media root is unavailable: {base}; library history was retained")
     stats = {"new": 0, "changed": 0, "unchanged": 0, "missing": 0, "skipped": 0}
     existing = {
         i.relpath: i
@@ -86,11 +99,11 @@ def scan_podcast_root(session: Session, root: MediaRoot, progress=lambda msg: No
             if time.time() - t.stat().st_mtime < MTIME_GUARD_S:
                 stats["skipped"] += 1  # probably still saving — next scan
                 continue
-            n = first_int(t.name)
+            n = episode_number(t.stem)
             if n is not None:
-                matches = [a for a in audios if first_int(a.name) == n]
+                matches = [a for a in audios if episode_number(a.stem) == n]
             else:
-                matches = audios if len(audios) == 1 else []
+                matches = audios if len(audios) == len(transcripts) == 1 else []
             if len(matches) != 1:
                 stats["skipped"] += 1
                 continue
@@ -123,6 +136,9 @@ def scan_podcast_root(session: Session, root: MediaRoot, progress=lambda msg: No
                     enqueue(session, "ingest_item", {"item_id": item.id})
                 else:
                     stats["unchanged"] += 1
+                    cached = settings.audio_dir / f"{item.id}.m4a"
+                    if not cached.is_file() or cached.stat().st_size == 0 or (item.meta or {}).get("m4a_fp") != item.fingerprint:
+                        enqueue(session, "repair_media", {"item_id": item.id})
                 continue
             else:
                 progress(f"probing {showdir.name}/{audio.name}")
@@ -176,18 +192,26 @@ def _sync_transcript(
     return False
 
 
-def transcode_m4a(audio_path: Path, item: MediaItem) -> Path:
+def transcode_m4a(audio_path: Path, item: MediaItem, force=False) -> Path:
     """Transcode into the audio cache once per content fingerprint."""
     settings.audio_dir.mkdir(parents=True, exist_ok=True)
     out = settings.audio_dir / f"{item.id}.m4a"
-    if out.exists() and (item.meta or {}).get("m4a_fp") == item.fingerprint:
+    if not force and out.is_file() and out.stat().st_size > 0 and (item.meta or {}).get("m4a_fp") == item.fingerprint:
         return out
-    subprocess.run(
-        ["ffmpeg", "-loglevel", "error", "-i", str(audio_path),
-         "-vn", "-c:a", "aac", "-b:a", "128k", "-y", str(out)],
-        check=True,
-    )
-    item.meta = {**(item.meta or {}), "m4a_fp": item.fingerprint}
+    temporary = out.with_suffix(".part.m4a")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-loglevel", "error", "-i", str(audio_path),
+             "-vn", "-c:a", "aac", "-b:a", "128k", "-y", str(temporary)],
+            check=True, timeout=7200,
+        )
+        if not temporary.is_file() or temporary.stat().st_size == 0:
+            raise RuntimeError("Audio conversion produced an empty file")
+        temporary.replace(out)
+    finally:
+        temporary.unlink(missing_ok=True)
+    from uuid import uuid4
+    item.meta = {**(item.meta or {}), "m4a_fp": item.fingerprint, "m4a_revision": uuid4().hex}
     return out
 
 
@@ -228,8 +252,14 @@ def ingest_podcast_item(session: Session, item_id: int, progress=lambda msg: Non
     transcode_m4a(base / item.relpath, item)
 
     progress("analyzing transcript")
-    sentences = split_sentences(read_transcript(base / track.relpath))
-    segments = [Segment(t0_ms=0, t1_ms=0, text=s) for s in sentences]
+    timed = track.format == "srt"
+    if timed:
+        from .subtitles import parse_cues, segment_cues
+        cues, _ = parse_cues(base / track.relpath, "zh")
+        segments = segment_cues(cues)
+    else:
+        sentences = split_sentences(read_transcript(base / track.relpath))
+        segments = [Segment(t0_ms=0, t1_ms=0, text=s) for s in sentences]
     write_sentences(session, item, track, segments, None)
 
     cover_rel = (item.meta or {}).get("cover")
@@ -238,9 +268,9 @@ def ingest_podcast_item(session: Session, item_id: int, progress=lambda msg: Non
         series = session.get(Series, item.series_id)
         if series and series.cover_item_id is None:
             series.cover_item_id = item.id
-    item.ready = False  # playable once whisper_align sets times
+    item.ready = timed  # Existing SRT cue times need no ASR realignment.
     session.commit()
-    enqueue(session, "whisper_align", {"item_id": item.id})
+    enqueue(session, "translate_item" if timed else "whisper_align", {"item_id": item.id})
 
 
 def whisper_align_item(session: Session, item_id: int, progress=lambda msg: None) -> dict:
@@ -275,11 +305,17 @@ def whisper_align_item(session: Session, item_id: int, progress=lambda msg: None
     if not sentences:
         return {"skipped": "no sentences"}
     progress(f"aligning {len(sentences)} sentences")
-    times = sentence_times([s.zh for s in sentences], words)
-    for s, (t0, t1) in zip(sentences, times):
+    times, quality = sentence_times([s.zh for s in sentences], words, with_quality=True)
+    from ..corrections import identity_for, apply_overrides
+    for s, (t0, t1), reliability in zip(sentences, times, quality):
+        identity = identity_for(session, s)
+        identity.source = {**identity.source, "t0_ms": round(t0 * 1000), "t1_ms": round(t1 * 1000), "timing_quality": reliability}
+        identity.revision += 1
         s.t0_ms = round(t0 * 1000)
         s.t1_ms = round(t1 * 1000)
+        apply_overrides(s, identity)
     item.ready = True
+    item.meta = {**(item.meta or {}), "analysis_rev": (item.meta or {}).get("analysis_rev", 0) + 1}
     session.commit()
     enqueue(session, "translate_item", {"item_id": item.id})
     return {"aligned": len(sentences)}

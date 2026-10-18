@@ -12,12 +12,12 @@ from pypinyin import Style, pinyin as py
 from .cedict import Cedict, load as load_cedict
 
 SENT_END = "。！？!?…"
-CJK = re.compile(r"[㐀-鿿]")
+CJK = re.compile(r"[㐀-鿿\U00020000-\U000323AF]")
 
 
 def split_sentences(text: str) -> list[str]:
     """Split on Chinese sentence-final punctuation, keeping the punctuation."""
-    text = re.sub(r"[\s﻿]+", "", text)  # spacing carries no meaning in a zh transcript
+    text = re.sub(r"[\s﻿]+", " ", text).strip()  # preserve code-switching word boundaries
     out, buf = [], ""
     for ch in text:
         buf += ch
@@ -140,9 +140,9 @@ def _tag_names(
 
 def word_pinyin(word: str) -> tuple[list[str], list[int]]:
     """Per-character display pinyin (tone marks) and tone numbers (5 = neutral)."""
-    marks = [s[0] for s in py(word, style=Style.TONE)]
+    marks = [s[0] for s in py(word, style=Style.TONE, errors=lambda chars: list(chars))]
     nums = []
-    for s in py(word, style=Style.TONE3, neutral_tone_with_five=True):
+    for s in py(word, style=Style.TONE3, neutral_tone_with_five=True, errors=lambda chars: list(chars)):
         m = re.search(r"(\d)$", s[0])
         nums.append(int(m.group(1)) if m else 5)
     return marks, nums
@@ -152,6 +152,7 @@ def analyze_sentences(
     sentences: list[str],
     cedict: Cedict | None = None,
     names: dict[str, str] | None = None,
+    token_lists: list[list[str]] | None = None,
 ) -> list[list[dict]]:
     """Tokenize pre-split sentences -> per-sentence word lists.
 
@@ -165,8 +166,23 @@ def analyze_sentences(
     reconcile re-split: an OOV name stays one tappable word instead of
     shattering into per-character glosses."""
     cedict = cedict or load_cedict()
-    token_lists = tokenize(sentences)
-    entity_lists = ner_entities(token_lists)
+    from .convert import t2s
+    model_sentences = [t2s(sentence) for sentence in sentences]
+    model_sentences = [converted if len(converted) == len(source) else source
+                       for source, converted in zip(sentences, model_sentences)]
+    supplied_tokens = token_lists is not None
+    model_tokens = token_lists if supplied_tokens else tokenize(model_sentences)
+    token_lists = []
+    for source, model_text, tokens in zip(sentences, model_sentences, model_tokens):
+        surfaces, cursor = [], 0
+        for token in tokens:
+            start = model_text.find(token, cursor)
+            if start < 0:
+                raise ValueError("Tokenizer output does not match normalized source")
+            cursor = start + len(token)
+            surfaces.append(source[start:cursor])
+        token_lists.append(surfaces)
+    entity_lists = [[] for _ in token_lists] if supplied_tokens else ner_entities(token_lists)
 
     lexicon = dict(names or {})
     for entities in entity_lists:
@@ -176,20 +192,44 @@ def analyze_sentences(
                 lexicon.setdefault(text, label)
 
     result = []
-    for tokens, entities in zip(token_lists, entity_lists):
+    for sentence, tokens, entities in zip(sentences, token_lists, entity_lists):
         words = []
+        # Phrase disambiguation sees the complete sentence, not isolated tokens.
+        from .convert import t2s
+        pronunciation_text = t2s(sentence)
+        if len(pronunciation_text) != len(sentence):
+            pronunciation_text = sentence
+        context_marks, context_tones = word_pinyin(pronunciation_text)
+        context_valid = len(context_marks) == len(sentence)
+        cursor = 0
         for t, ne in _tag_names(tokens, entities, lexicon):
             for p in [t] if ne else reconcile([t], cedict):
+                start = sentence.find(p, cursor)
+                if start < 0:
+                    raise ValueError("Tokenizer output does not match source text")
+                if start > cursor:
+                    words.append({"t": sentence[cursor:start], "type": "x", "start": cursor, "end": start})
+                end = start + len(p)
+                cursor = end
                 if not CJK.search(p):
-                    words.append({"t": p, "type": "x"})  # latin/digits/punct passthrough
+                    words.append({"t": p, "type": "x", "start": start, "end": end})  # latin/digits/punct passthrough
                     continue
-                marks, nums = word_pinyin(p)
-                w = {"t": p, "type": "zh", "py": marks, "tones": nums}
+                canonical = cedict.canonical(p)
+                marks, nums = word_pinyin(canonical)
+                if context_valid:
+                    marks, nums = context_marks[start:end], context_tones[start:end]
+                w = {"t": p, "type": "zh", "canonical": canonical,
+                     "start": start, "end": end, "py": marks, "tones": nums,
+                     "reading_source": "pypinyin-context" if context_valid else "pypinyin-word"}
+                from pypinyin.contrib.tone_convert import to_tone3
+                w["reading"] = " ".join(to_tone3(m, neutral_tone_with_five=True) for m in marks)
                 gl = cedict.gloss(p)
                 if gl:
                     w["gloss"] = gl
                 if ne:
                     w["ne"] = ne
                 words.append(w)
+        if cursor < len(sentence):
+            words.append({"t": sentence[cursor:], "type": "x", "start": cursor, "end": len(sentence)})
         result.append(words)
     return result

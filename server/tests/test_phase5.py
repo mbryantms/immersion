@@ -6,7 +6,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -265,5 +264,6 @@ def test_embedded_zh_stream_extracted(db_session, seeded, tmp_path, monkeypatch)
         tracks = ensure_embedded_tracks(s, item, mkv)
         assert len(tracks) == 1
         assert tracks[0].lang == "zh" and tracks[0].source == "embedded"
-        assert (tmp_path / "subs" / f"{item.id}.1.srt").exists()
+        from app.ingest.embedded import sub_path
+        assert sub_path(item.id, 1, item.fingerprint).exists()
         assert (item.meta or {}).get("embedded_checked") == item.fingerprint

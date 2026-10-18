@@ -1,0 +1,15 @@
+[
+  {"expected":"大家好。","typed":"大家好","score":1},
+  {"expected":"我爱你","typed":"我不爱你","score":0.75},
+  {"expected":"你好","typed":"你好你好","score":0.5},
+  {"expected":"大家好","typed":"大好","score":0.6666666666666666},
+  {"expected":"大家好","typed":"大蒙好","score":0.6666666666666666},
+  {"expected":"我有2个","typed":"我有8个","score":0.75},
+  {"expected":"我是Nathan","typed":"我是","score":0.25},
+  {"expected":"我是Nathan。","typed":"我是 nathan!","score":1},
+  {"expected":"１２个","typed":"12个","score":1},
+  {"expected":"𠀀好","typed":"𠀀好","score":1},
+  {"expected":"！！","typed":"","score":1},
+  {"expected":"你好","typed":"","score":0},
+  {"expected":"","typed":"多余","score":0}
+]

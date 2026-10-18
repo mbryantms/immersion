@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 
 from pypinyin import Style, pinyin as py
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -22,6 +22,7 @@ from ..lingua.pipeline import analyze_sentences
 from ..models import (
     MediaItem,
     SavedContext,
+    SavedItem,
     Sentence,
     Series,
     SeriesName,
@@ -38,7 +39,7 @@ def numbered_pinyin(word: str) -> str:
     return " ".join(s[0] for s in py(word, style=Style.TONE3, neutral_tone_with_five=True))
 
 
-CJK_RE = re.compile(r"[㐀-鿿]")
+CJK_RE = re.compile(r"[㐀-鿿\U00020000-\U000323AF]")
 
 
 def fts_row(sentence: Sentence) -> tuple:
@@ -46,10 +47,20 @@ def fts_row(sentence: Sentence) -> tuple:
     space-joined HanLP tokens, space-joined chars (substring matches via
     phrase queries), traditional tokens, toneless pinyin, english."""
     words = (sentence.analysis or {}).get("words", [])
-    zh_words = " ".join(w["t"] for w in words if w["type"] == "zh")
-    zh_chars = " ".join(ch for ch in sentence.zh if CJK_RE.match(ch))
+    zh_words = " ".join(w.get("canonical", convert.t2s(w["t"])) for w in words if w["type"] == "zh")
+    zh_chars = " ".join(ch for ch in convert.t2s(sentence.zh) if CJK_RE.match(ch))
     trad_words = " ".join(w.get("tr", w["t"]) for w in words if w["type"] == "zh")
-    toneless = " ".join(s[0] for s in py(sentence.zh, style=Style.NORMAL) if s[0].strip())
+    from pypinyin.contrib.tone_convert import to_normal
+    syllables = []
+    for word in words:
+        reading = word.get("reading") or " ".join(word.get("py", []))
+        if reading:
+            syllables.extend(to_normal(syllable) for syllable in reading.split())
+        else:
+            syllables.extend(s[0] for s in py(convert.t2s(word["t"]), style=Style.NORMAL) if s[0].strip())
+    toneless = " ".join(syllables)
+    if not toneless:
+        toneless = " ".join(s[0] for s in py(convert.t2s(sentence.zh), style=Style.NORMAL) if s[0].strip())
     return (sentence.id, zh_words, zh_chars, trad_words, toneless, sentence.en or "")
 
 
@@ -74,6 +85,9 @@ def get_or_create_lexemes(
 
     names = names or {}
     ids: dict[str, int] = {}
+    cedict = load_cedict()
+    canonical = {surface: cedict.canonical(surface) for surface in surfaces}
+    surfaces = set(canonical.values())
     todo = list(surfaces)
     for i in range(0, len(todo), 900):
         chunk = todo[i : i + 900]
@@ -99,7 +113,7 @@ def get_or_create_lexemes(
         session.flush()
         for lex in session.scalars(select(Lexeme).where(Lexeme.simplified.in_(missing))):
             ids[lex.simplified] = lex.id
-    return ids
+    return {surface: ids[key] for surface, key in canonical.items()}
 
 
 def series_name_lexicon(session: Session, item: MediaItem) -> dict[str, str]:
@@ -145,8 +159,13 @@ def link_words(zh: str, words: list[dict], lex_ids: dict[str, int]) -> str:
     traditional sentence."""
     spans, pos = [], 0
     for w in words:
-        spans.append((pos, pos + len(w["t"])))
-        pos += len(w["t"])
+        start = w.get("start", zh.find(w["t"], pos))
+        end = w.get("end", start + len(w["t"]))
+        if start < pos or zh[start:end] != w["t"]:
+            raise ValueError("Token offsets do not match source text")
+        w["start"], w["end"] = start, end
+        spans.append((start, end))
+        pos = end
     trad, trad_toks = convert.sentence_traditional(zh, spans)
     for w, tr in zip(words, trad_toks):
         if w["type"] == "zh":
@@ -156,11 +175,48 @@ def link_words(zh: str, words: list[dict], lex_ids: dict[str, int]) -> str:
     return trad
 
 
+def selected_readings(session: Session, item_id: int) -> dict:
+    selections = {}
+    for context, saved in session.execute(
+        select(SavedContext, SavedItem).join(SavedItem)
+        .where(SavedContext.snapshot["item_id"].as_integer() == item_id)
+        .order_by(SavedContext.added_at)
+    ):
+        snap = context.snapshot or {}
+        readings = snap.get("selected_occurrences") or {}
+        if not readings and snap.get("occurrence_start") is not None:
+            readings = {str(snap["occurrence_start"]): snap.get("selected_reading") or saved.selected_reading}
+        for start, reading in readings.items():
+            if reading:
+                selections.setdefault((snap.get("zh"), snap.get("sentence_ord")), []).append((snap, int(start), reading))
+    return selections
+
+
+def restore_selected_readings(selections: dict, zh: str, words: list[dict], ordinal: int) -> None:
+    """Replay explicit occurrence readings only against the exact source revision.
+
+    No first-substring matching: repeated lines use their original ordinal and
+    tokens must retain the same surface and offset. Resegmented spans are left
+    unchanged rather than applying a correction to a different word.
+    """
+    from ..lingua.readings import set_reading
+    for snap, start, reading in selections.get((zh, ordinal), []):
+        original = next((w for w in (snap.get("analysis") or {}).get("words", []) if w.get("start") == start), None)
+        for i, word in enumerate(words):
+            if original and word.get("start") == start and word["t"] == original["t"]:
+                try:
+                    words[i] = set_reading(word, reading)
+                except ValueError:
+                    pass  # retain legacy snapshots with non-syllabic readings
+
+
 def token_occurrences(item_id: int, sentences: list[Sentence]) -> list[TokenOccurrence]:
     return [
         TokenOccurrence(
             sentence_id=s.id, idx=i, item_id=item_id,
             surface=w["t"], lexeme_id=w["lex"],
+            start_offset=w.get("start"), end_offset=w.get("end"),
+            canonical=w.get("canonical"), reading=w.get("reading"),
         )
         for s in sentences
         for i, w in enumerate(s.analysis["words"])
@@ -185,48 +241,94 @@ def write_sentences(
     name_words = {w["t"]: w["ne"] for words in words_per_seg for w in words if w.get("ne")}
     lex_ids = get_or_create_lexemes(session, surfaces, name_words)
 
-    # unlink saved contexts (snapshot keeps the data), then drop old rows
-    old_ids = [i for (i,) in session.execute(select(Sentence.id).where(Sentence.item_id == item.id))]
-    if old_ids:
-        session.execute(
-            update(SavedContext).where(SavedContext.sentence_id.in_(old_ids)).values(sentence_id=None)
-        )
-        for i in range(0, len(old_ids), 500):
-            chunk = old_ids[i : i + 500]
-            session.execute(
-                text(f"DELETE FROM sentence_fts WHERE rowid IN ({','.join(map(str, chunk))})")
-            )
+    from ..corrections import identity_for, reserve_ids, apply_overrides, source_snapshot, bump_revision
+    from ..models import SentenceIdentity
+    old = session.scalars(select(Sentence).where(Sentence.item_id == item.id)).all()
+    old_identities = {sentence.id: identity_for(session, sentence) for sentence in old}
+    reserve_ids(session)
+    identities = session.scalars(select(SentenceIdentity).where(
+        SentenceIdentity.item_id == item.id, SentenceIdentity.track_id == track.id)).all()
+    candidates = {}
+    for identity in identities:
+        if identity.source.get("fingerprint") == item.fingerprint:
+            candidates.setdefault(identity.source.get("zh"), []).append(identity)
+    new_counts = Counter(segment.text for segment in segments)
+    used = set()
+    sentences = []
+    selections = selected_readings(session, item.id)
+    for ordinal, (segment, words) in enumerate(zip(segments, words_per_seg)):
+        available = [candidate for candidate in candidates.get(segment.text, []) if candidate.id not in used]
+        identity = None
+        # Repeated text requires an unambiguous timing anchor. Untimed repeated
+        # paragraphs only keep IDs when cardinality and ordinal both agree.
+        ranked = sorted(available, key=lambda candidate: abs(candidate.source.get("t0_ms", 0) - segment.t0_ms)
+                        + abs(candidate.source.get("t1_ms", 0) - segment.t1_ms))
+        if len(candidates.get(segment.text, [])) == new_counts[segment.text] == 1:
+            identity = available[0] if available else None
+        elif ranked and segment.t1_ms > segment.t0_ms:
+            def distance(candidate):
+                return abs(candidate.source.get("t0_ms", 0) - segment.t0_ms) + abs(candidate.source.get("t1_ms", 0) - segment.t1_ms)
+            if distance(ranked[0]) <= 1500 and (len(ranked) == 1 or distance(ranked[0]) < distance(ranked[1])):
+                identity = ranked[0]
+        elif len(candidates.get(segment.text, [])) == new_counts[segment.text]:
+            identity = next((candidate for candidate in available if candidate.source.get("ordinal") == ordinal), None)
+        if identity is None:
+            identity = SentenceIdentity(item_id=item.id, track_id=track.id, source={})
+            session.add(identity)
+            session.flush()
+        used.add(identity.id)
+        if identity.source:
+            identity.revision += 1
+        sentence = session.get(Sentence, identity.id)
+        if sentence is None:
+            sentence = Sentence(id=identity.id, item_id=item.id, track_id=track.id)
+            session.add(sentence)
+        traditional = link_words(segment.text, words, lex_ids)
+        restore_selected_readings(selections, segment.text, words, ordinal)
+        english, coverage = en[ordinal] if en else (None, 0.0)
+        # Keep generated translations of the same unchanged source on rescan.
+        prior = identity.source
+        sentence.ordinal, sentence.zh = ordinal, segment.text
+        sentence.t0_ms, sentence.t1_ms = segment.t0_ms, segment.t1_ms
+        sentence.trad = traditional if traditional != segment.text else None
+        sentence.en = english if english is not None else prior.get("en") if prior.get("en_source") == "ai" else None
+        sentence.en_source = "track" if english is not None else "ai" if prior.get("en_source") == "ai" else None
+        sentence.align_conf = coverage if english is not None else None
+        sentence.analysis = {"words": words}
+        identity.source = source_snapshot(sentence, item.fingerprint)
+        apply_overrides(sentence, identity)
+        sentences.append(sentence)
+    removed = [sentence.id for sentence in old if sentence.id not in used]
+    if removed:
+        for context in session.scalars(select(SavedContext).where(SavedContext.sentence_id.in_(removed))):
+            previous = old_identities[context.sentence_id]
+            context.snapshot = {**(context.snapshot or {}),
+                                "source_fingerprint": previous.source.get("fingerprint"),
+                                "track_id": previous.track_id}
+            context.sentence_id = None
+    old_ids = [sentence.id for sentence in old]
+    for i in range(0, len(old_ids), 500):
+        session.execute(text("DELETE FROM sentence_fts WHERE rowid IN (" + ",".join(map(str, old_ids[i:i+500])) + ")"))
     session.execute(delete(TokenOccurrence).where(TokenOccurrence.item_id == item.id))
-    session.execute(delete(Sentence).where(Sentence.item_id == item.id))
-
-    sentences: list[Sentence] = []
-    for ord_, (seg, words) in enumerate(zip(segments, words_per_seg)):
-        trad = link_words(seg.text, words, lex_ids)
-        en_text, conf = en[ord_] if en else (None, 0.0)
-        sentences.append(Sentence(
-            item_id=item.id, track_id=track.id, ordinal=ord_,
-            zh=seg.text, trad=trad if trad != seg.text else None,
-            t0_ms=seg.t0_ms, t1_ms=seg.t1_ms,
-            en=en_text, en_source="track" if en_text else None,
-            align_conf=conf if en_text else None,
-            analysis={"words": words},
-        ))
-    session.add_all(sentences)
+    if removed:
+        session.execute(delete(Sentence).where(Sentence.id.in_(removed)))
     session.flush()
-
     session.add_all(token_occurrences(item.id, sentences))
-
     write_fts(session, sentences)
-
-    # re-link surviving saved contexts by exact zh match
-    by_zh = {s.zh: s.id for s in sentences}
-    orphans = session.scalars(
-        select(SavedContext).where(SavedContext.sentence_id.is_(None))
-    )
-    for ctx in orphans:
-        snap = ctx.snapshot or {}
-        if snap.get("item_id") == item.id and snap.get("zh") in by_zh:
-            ctx.sentence_id = by_zh[snap["zh"]]
+    # Existing exact identities stay linked. Legacy orphan snapshots are only
+    # relinked when source text + timing/ordinal identify exactly one line.
+    orphans = session.scalars(select(SavedContext).where(SavedContext.sentence_id.is_(None)))
+    for context in orphans:
+        snap = context.snapshot or {}
+        if (snap.get("item_id") != item.id or snap.get("track_id") != track.id
+                or "source_fingerprint" not in snap or snap["source_fingerprint"] != item.fingerprint):
+            continue
+        matches = [sentence for sentence in sentences if sentence.zh == snap.get("zh")
+                   and sentence.ordinal == snap.get("sentence_ord")
+                   and sentence.t0_ms == snap.get("t0_ms") and sentence.t1_ms == snap.get("t1_ms")]
+        if len(matches) == 1:
+            context.sentence_id = matches[0].id
+    bump_revision(item)
     session.flush()
 
 
@@ -256,9 +358,16 @@ def reanalyze_item(session: Session, item_id: int, progress=lambda msg: None) ->
     name_words = {w["t"]: w["ne"] for words in words_per_seg for w in words if w.get("ne")}
     lex_ids = get_or_create_lexemes(session, surfaces, name_words)
 
+    selections = selected_readings(session, item.id)
+    from ..corrections import identity_for, apply_overrides
     for s, words in zip(sentences, words_per_seg):
-        link_words(s.zh, words, lex_ids)
+        trad = link_words(s.zh, words, lex_ids)
+        restore_selected_readings(selections, s.zh, words, s.ordinal)
+        s.trad = trad if trad != s.zh else None
         s.analysis = {"words": words}
+        identity = identity_for(session, s)
+        identity.revision += 1
+        apply_overrides(s, identity)
 
     session.execute(delete(TokenOccurrence).where(TokenOccurrence.item_id == item.id))
     session.add_all(token_occurrences(item.id, sentences))
@@ -277,17 +386,26 @@ def reanalyze_item(session: Session, item_id: int, progress=lambda msg: None) ->
     return {"sentences": len(sentences)}
 
 
-def make_thumb(video_path: Path, item_id: int, duration_ms: int | None) -> None:
+def make_thumb(video_path: Path, item_id: int, duration_ms: int | None, fingerprint: str | None = None) -> None:
     settings.thumb_dir.mkdir(parents=True, exist_ok=True)
     out = settings.thumb_dir / f"{item_id}.jpg"
-    if out.exists():
+    marker = out.with_suffix(".fp")
+    if out.exists() and (fingerprint is None or (marker.exists() and marker.read_text() == fingerprint)):
         return
+    temporary = out.with_suffix(".part.jpg")
     seek = (duration_ms or 60_000) / 2000
-    subprocess.run(
-        ["ffmpeg", "-v", "quiet", "-ss", f"{seek:.1f}", "-i", str(video_path),
-         "-frames:v", "1", "-vf", "scale=480:-2", "-y", str(out)],
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-v", "quiet", "-ss", f"{seek:.1f}", "-i", str(video_path),
+             "-frames:v", "1", "-vf", "scale=480:-2", "-y", str(temporary)],
+            check=False, timeout=120,
+        )
+        if result.returncode == 0 and temporary.is_file() and temporary.stat().st_size > 0:
+            temporary.replace(out)
+            if fingerprint:
+                marker.write_text(fingerprint)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def resolve_track_path(base: str | Path, item: MediaItem, track: TextTrack) -> Path | None:
@@ -301,7 +419,7 @@ def resolve_track_path(base: str | Path, item: MediaItem, track: TextTrack) -> P
         idx = (track.meta or {}).get("stream_index")
         if idx is None:
             return None
-        path = sub_path(item.id, idx)
+        path = sub_path(item.id, idx, item.fingerprint)
         if path.exists() or extract_stream(Path(base) / item.relpath, idx, path):
             return path
     return None
@@ -338,21 +456,24 @@ def ingest_item(session: Session, item_id: int, progress=lambda msg: None) -> No
     ).all()
     zh = _pick_track(tracks, "zh")
     en = _pick_track(tracks, "en")
-    if (zh is None or en is None) and item.kind == "video":
+    if item.kind == "video":
         from .embedded import ensure_embedded_tracks
 
         ensure_embedded_tracks(session, item, base / item.relpath)
         tracks = session.scalars(
             select(TextTrack).where(TextTrack.item_id == item.id, TextTrack.selected)
         ).all()
-        zh = zh or _pick_track(tracks, "zh")
-        en = en or _pick_track(tracks, "en")
+        zh = _pick_track(tracks, "zh")
+        en = _pick_track(tracks, "en")
 
     zh_path = resolve_track_path(base, item, zh) if zh else None
-    if zh_path is None:
-        make_thumb(base / item.relpath, item.id, item.duration_ms)
+    if zh_path is None or not zh_path.is_file():
+        item.ready = False
+        item.meta = {**(item.meta or {}), "source_status": "Select an available Chinese subtitle track"}
+        make_thumb(base / item.relpath, item.id, item.duration_ms, item.fingerprint)
         whisper = next((t for t in tracks if t.lang == "zh" and t.source == "whisper"), None)
-        if whisper is not None and item.ready:
+        if whisper is not None and session.scalar(select(Sentence.id).where(Sentence.item_id == item.id).limit(1)) is not None:
+            item.ready = True
             progress("keeping whisper-generated transcript")
         elif item.kind == "video" and _setting_true(session, "whisper_unsubbed"):
             # low priority: subtitle ingests should never wait on GPU work
@@ -370,13 +491,17 @@ def ingest_item(session: Session, item_id: int, progress=lambda msg: None) -> No
     en_path = resolve_track_path(base, item, en) if en else None
     if en_path is not None:
         en_cues, _ = parse_cues(en_path, "en")
+        from .subtitles import Cue
+        shift = (en.offset_ms or 0) - (zh.offset_ms or 0)
+        en_cues = [Cue(c.t0_ms + shift, c.t1_ms + shift, c.text) for c in en_cues]
         en_assign = assign_en(segments, en_cues)
 
     progress(f"analyzing {len(segments)} sentences")
     write_sentences(session, item, zh, segments, en_assign)
 
-    make_thumb(base / item.relpath, item.id, item.duration_ms)
+    make_thumb(base / item.relpath, item.id, item.duration_ms, item.fingerprint)
     item.ready = True
+    item.meta = {**(item.meta or {}), "source_status": None}
     if item.series_id:
         series = session.get(Series, item.series_id)
         if series and series.cover_item_id is None:

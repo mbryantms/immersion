@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
@@ -30,17 +30,19 @@ router = APIRouter()
 def stream_url(item: MediaItem, root_slug: str) -> str:
     # audio items stream the ingest-transcoded m4a (sample-accurate seeking),
     # never the original file under the root
+    meta = item.meta or {}
+    from ..ingest.remux import remux_current
     if item.kind == "audio":
-        return f"/media/audio/{item.id}.m4a"
+        return f"/media/audio/{item.id}.m4a?v={meta.get('m4a_revision', item.fingerprint or 'legacy')}"
     # non-direct-play video streams its cached remux once the fp matches
-    if ((item.meta or {}).get("remux") or {}).get("fp") == item.fingerprint:
-        return f"/media/remux/{item.id}.mp4"
-    return f"/media/{root_slug}/{quote(item.relpath)}"
+    if remux_current(item):
+        return f"/media/remux/{item.id}.mp4?v={meta['remux'].get('revision', item.fingerprint or 'legacy')}"
+    return f"/media/{root_slug}/{quote(item.relpath)}?v={item.fingerprint or 'legacy'}"
 
 
 def coverage_by_item(session: Session, item_ids: list[int]) -> dict[int, dict]:
     """item_id -> {coverage, tokens, unknown_lexemes}; coverage counts known +
-    familiar (passively-acquired, derive.py) tokens over non-ignored tokens."""
+    familiar (exposure estimates, derive.py) tokens over non-ignored tokens."""
     if not item_ids:
         return {}
     known = case((KnowledgeState.state.in_(("known", "familiar")), 1), else_=0)
@@ -67,6 +69,8 @@ def coverage_by_item(session: Session, item_ids: list[int]) -> dict[int, dict]:
             "coverage": round((known_n or 0) / denom, 4),
             "tokens": total,
             "unknown_lexemes": unknown_n or 0,
+            "ignored_tokens": ignored_n or 0,
+            "eligible_tokens": total-(ignored_n or 0),
         }
     return out
 
@@ -136,7 +140,7 @@ def get_library(session: Session = Depends(get_session)):
         "continue": [
             {"item_id": i.id, "title": i.title, "series_id": i.series_id,
              "position_ms": p.position_ms, "duration_ms": i.duration_ms,
-             "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2", "updated_at": p.updated_at}
+             "thumb_url": f"/media/thumbs/{i.id}.jpg?v={i.fingerprint or 'legacy'}", "updated_at": p.updated_at}
             for p, i in cont
         ],
     }
@@ -144,33 +148,15 @@ def get_library(session: Session = Depends(get_session)):
 
 @router.get("/recommendations")
 def recommendations(session: Session = Depends(get_session)):
-    """i+1 picks: ready, unfinished items whose known+familiar coverage sits in
-    the comprehension sweet spot — hard enough to feed acquisition, easy enough
-    to follow. Sorted by closeness to the target, ties broken by series order."""
-    LOW, TARGET, HIGH = 0.88, 0.95, 0.985
-    items = session.scalars(
-        select(MediaItem).where(MediaItem.available, MediaItem.ready)
-    ).all()
-    completed = {
-        p.item_id
-        for p in session.scalars(select(PlaybackProgress).where(PlaybackProgress.completed))
-    }
-    candidates = [i for i in items if i.id not in completed]
-    cov = coverage_by_item(session, [i.id for i in candidates])
-    scored = [
-        (abs(cov[i.id]["coverage"] - TARGET), i, cov[i.id])
-        for i in candidates
-        if i.id in cov and LOW <= cov[i.id]["coverage"] <= HIGH
-    ]
-    fallback = not scored
-    if fallback:
-        # cold start: nothing reaches the band yet (young knowledge base) —
-        # the most-familiar unfinished items are still the best next input
-        scored = [
-            (1 - cov[i.id]["coverage"], i, cov[i.id])
-            for i in candidates if i.id in cov
-        ]
-    scored.sort(key=lambda t: (t[0], t[1].series_id or 0, t[1].ordinal or 0))
+    """Rank unfinished content by visible, uncertain difficulty signals."""
+    from ..recommendations import rank_content
+    LOW, HIGH = 0.88, 0.985  # legacy display contract; not a selection gate
+    items = session.scalars(select(MediaItem).where(MediaItem.available, MediaItem.ready)).all()
+    completed = set(session.scalars(select(PlaybackProgress.item_id).where(PlaybackProgress.completed)))
+    candidates = [item for item in items if item.id not in completed]
+    cov = coverage_by_item(session, [item.id for item in candidates])
+    scored = rank_content(session, candidates, cov)
+    fallback = not any(c["coverage"] >= LOW for _, _, c in scored)
     series_titles = {s.id: s.title for s in session.scalars(select(Series))}
     return {
         "band": {"low": LOW, "high": HIGH},
@@ -182,9 +168,9 @@ def recommendations(session: Session = Depends(get_session)):
                 "series_title": series_titles.get(i.series_id),
                 "ordinal": i.ordinal,
                 "duration_ms": i.duration_ms,
-                "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2",
+                "thumb_url": f"/media/thumbs/{i.id}.jpg?v={i.fingerprint or 'legacy'}",
                 "coverage": c["coverage"],
-                "unknown_lexemes": c["unknown_lexemes"],
+                **c,
             }
             for _, i, c in scored[:6]
         ],
@@ -193,8 +179,11 @@ def recommendations(session: Session = Depends(get_session)):
 
 @router.post("/roots")
 def add_root(body: RootIn, session: Session = Depends(get_session)):
-    if body.slug in ("thumbs", "audio") or "/" in body.slug or not body.slug.isascii():
-        raise HTTPException(400, "invalid slug")
+    from ..config import validate_root_slug
+    try:
+        validate_root_slug(body.slug)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
     if session.scalar(select(MediaRoot).where(MediaRoot.slug == body.slug)):
         raise HTTPException(409, "slug exists")
     root = MediaRoot(slug=body.slug, kind=body.kind, path=body.path, include_glob=body.include_glob)
@@ -237,7 +226,7 @@ def get_series(series_id: int, session: Session = Depends(get_session)):
                 "id": i.id, "title": i.title, "ordinal": i.ordinal,
                 "duration_ms": i.duration_ms, "ready": i.ready, "available": i.available,
                 "has_zh": i.id in has_zh,
-                "thumb_url": f"/media/thumbs/{i.id}.jpg?v=2",
+                "thumb_url": f"/media/thumbs/{i.id}.jpg?v={i.fingerprint or 'legacy'}",
                 "position_ms": progress[i.id].position_ms if i.id in progress else 0,
                 "completed": progress[i.id].completed if i.id in progress else False,
                 **cov.get(i.id, {}),
@@ -270,8 +259,8 @@ def get_item(item_id: int, session: Session = Depends(get_session)):
     ids = [s.id for s in siblings]
     pos = ids.index(item_id) if item_id in ids else -1
 
-    # captions-off rewatch nudge: mastered content, watched through, and barely
-    # any recent dictionary reliance — suggest rewatching without subtitles
+    # Offer an optional listening sample after completion and high estimated
+    # vocabulary familiarity; this is not a measured comprehension decision.
     coverage = cov.get(item_id, {}).get("coverage", 0)
     rewatch_nudge = False
     if item.ready and progress is not None and progress.completed and coverage >= 0.95:
@@ -283,16 +272,21 @@ def get_item(item_id: int, session: Session = Depends(get_session)):
         )
         rewatch_nudge = (recent_lookups or 0) < 5
 
+    from ..tracks import choose_tracks, available
+    chosen = choose_tracks(session, item, persist=False)
     return {
+        "active_tracks": {language: track.id if track else None for language, track in chosen.items()},
+        "source_status": (item.meta or {}).get("source_status"),
         "id": item.id, "title": item.title, "kind": item.kind, "ordinal": item.ordinal,
         "duration_ms": item.duration_ms, "ready": item.ready, "available": item.available,
         "width": item.width, "height": item.height,
         "series": {"id": series.id, "title": series.title, "level": series.level_hint} if series else None,
         "stream_url": stream_url(item, root.slug),
-        "thumb_url": f"/media/thumbs/{item.id}.jpg?v=2",
+        "thumb_url": f"/media/thumbs/{item.id}.jpg?v={item.fingerprint or 'legacy'}",
         "tracks": [
             {"id": t.id, "lang": t.lang, "source": t.source, "format": t.format,
-             "offset_ms": t.offset_ms, "selected": t.selected}
+             "offset_ms": t.offset_ms, "selected": t.selected, "available": available(t),
+             "label": t.relpath or f"{t.source} stream {(t.meta or {}).get('stream_index', '')}"}
             for t in tracks
         ],
         "n_sentences": n_sentences,
@@ -319,6 +313,10 @@ def patch_track(track_id: int, body: TrackPatch, session: Session = Depends(get_
     if track is None:
         raise HTTPException(404)
     track.offset_ms = max(-30_000, min(30_000, body.offset_ms))
+    from ..corrections import bump_revision
+    bump_revision(session.get(MediaItem, track.item_id))
+    if track.lang == "en":
+        enqueue(session, "ingest_item", {"item_id": track.item_id})
     session.commit()
     return {"id": track.id, "offset_ms": track.offset_ms}
 
@@ -333,3 +331,56 @@ def transcribe_item(item_id: int, session: Session = Depends(get_session)):
         raise HTTPException(400, "podcasts align via their transcript")
     job = enqueue(session, "whisper_transcribe", {"item_id": item_id})
     return {"queued": job is not None}
+
+
+class TrackSelection(BaseModel):
+    zh_track_id: int = Field(gt=0)
+    en_track_id: int | None = Field(default=None, gt=0)
+
+
+@router.post("/items/{item_id}/tracks")
+def select_tracks(item_id: int, body: TrackSelection, session: Session = Depends(get_session)):
+    from ..tracks import available, choose_tracks
+    item = session.get(MediaItem, item_id)
+    if item is None:
+        raise HTTPException(404)
+    for language, track_id in (("zh", body.zh_track_id), ("en", body.en_track_id)):
+        if track_id is None:
+            continue
+        track = session.get(TextTrack, track_id)
+        if track is None or track.item_id != item.id or track.lang != language or not available(track):
+            raise HTTPException(400, "Choose an available track for this item and language")
+    item.meta = {**(item.meta or {}), "track_choices": {"zh": body.zh_track_id, "en": body.en_track_id},
+                 "source_status": "Updating transcript from selected tracks"}
+    choose_tracks(session, item)
+    item.ready = False
+    enqueue(session, "ingest_item", {"item_id": item.id})
+    return {"queued": True}
+
+
+@router.post("/items/{item_id}/repair-media")
+def repair_media(item_id: int, session: Session = Depends(get_session)):
+    item = session.get(MediaItem, item_id)
+    if item is None:
+        raise HTTPException(404)
+    if not item.available:
+        raise HTTPException(409, "Reconnect the source media root, then scan it again")
+    kind = "repair_media"
+    job = enqueue(session, kind, {"item_id": item.id})
+    return {"queued": job is not None}
+
+
+class DifficultyRating(BaseModel):
+    rating: str = Field(pattern="^(too_easy|manageable|too_hard)$")
+    goal: str = Field(pattern="^(read|listen|dictate)$")
+    position_ms: int = Field(default=0, ge=0)
+
+
+@router.post("/items/{item_id}/difficulty")
+def rate_difficulty(item_id: int, body: DifficultyRating, session: Session = Depends(get_session)):
+    if session.get(MediaItem, item_id) is None:
+        raise HTTPException(404)
+    session.add(Event(type="difficulty_rating", item_id=item_id, study_mode=body.goal,
+        position_ms=body.position_ms, data={"rating": body.rating, "method": "self_report"}))
+    session.commit()
+    return {"saved": True}

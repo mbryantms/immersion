@@ -23,6 +23,7 @@ interface Props {
   onToggleTraditional: () => void;
   pinyin: boolean;
   onTogglePinyin: () => void;
+  textControlsDisabled?: boolean;
   // present only for audio items (podcasts)
   dictation?: boolean;
   onToggleDictation?: () => void;
@@ -192,23 +193,23 @@ export default function Controls(p: Props) {
       </div>
 
       <div className="mt-2 flex items-center gap-2 overflow-x-auto border-t border-white/7 pt-2 scrollbar-none">
-        <span className="mr-1 hidden shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-500 md:inline">
-          Learning mode
+        <span className="mr-1 hidden shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-400 md:inline">
+          Practice tools
         </span>
-        <button className={learningButton(p.loop)} onClick={p.onToggleLoop} title="Loop sentence (L)">
+        <button aria-pressed={p.loop} className={learningButton(p.loop)} onClick={p.onToggleLoop} title="Loop sentence (L)">
           <ReplayIcon small /> <span>Loop</span>
         </button>
-        <button className={learningButton(p.pauseAfter)} onClick={p.onTogglePauseAfter} title="Pause after each sentence (M)">
+        <button aria-pressed={p.pauseAfter} className={learningButton(p.pauseAfter)} onClick={p.onTogglePauseAfter} title="Pause after each sentence (M)">
           <PauseAfterIcon /> <span>Auto-pause</span>
         </button>
-        <button className={learningButton(p.mode !== "off")} onClick={p.onCycleMode} title="Cycle subtitles (S)">
+        <button disabled={p.textControlsDisabled} aria-label="Cycle subtitle display" className={learningButton(p.mode !== "off")} onClick={p.onCycleMode} title="Cycle subtitles (S)">
           <SubtitlesIcon />
           <span>{p.mode === "off" ? "Subtitles off" : p.mode === "zh" ? "中文" : "中文 + English"}</span>
         </button>
-        <button className={learningButton(p.pinyin)} onClick={p.onTogglePinyin} title="Show pinyin (P)">
+        <button disabled={p.textControlsDisabled} aria-pressed={p.pinyin} className={learningButton(p.pinyin)} onClick={p.onTogglePinyin} title="Show pinyin (P)">
           <span className="font-zh text-sm font-semibold">拼</span> <span>Pinyin</span>
         </button>
-        <button className={learningButton(p.traditional)} onClick={p.onToggleTraditional} title="Use traditional characters">
+        <button aria-pressed={p.traditional} className={learningButton(p.traditional)} onClick={p.onToggleTraditional} title="Use traditional characters">
           <span className="font-zh text-sm font-semibold">繁</span> <span>Traditional</span>
         </button>
         {p.onToggleDictation && (
@@ -216,9 +217,9 @@ export default function Controls(p: Props) {
             <PencilIcon /> <span>Dictation</span>
           </button>
         )}
-        <button className={`${learningButton(false)} sm:hidden`} onClick={p.onCycleRate} title="Playback speed">
+        <span className="sm:hidden"><button className={learningButton(false)} onClick={p.onCycleRate} title="Playback speed">
           <span>{p.rate}× speed</span>
-        </button>
+        </button></span>
       </div>
     </div>
   );

@@ -6,11 +6,11 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
-from ..models import Event, KnowledgeState, Lexeme, LexemeStats, SavedItem, Setting, TokenOccurrence
+from ..models import Event, KnowledgeState, Lexeme, LexemeStats, LexemeExposure, SavedItem, Setting, TokenOccurrence
 
 router = APIRouter()
 
@@ -142,6 +142,13 @@ def reset_lexeme_stats(lexeme_id: int, session: Session = Depends(get_session)):
             "last_seen": stats.last_seen.isoformat() if stats.last_seen else None,
         }
         session.delete(stats)
-    session.add(Event(type="lexeme_stats_reset", lexeme_id=lexeme_id, data={"previous": previous}))
+    session.execute(delete(LexemeExposure).where(LexemeExposure.lexeme_id == lexeme_id))
+    ks = session.get(KnowledgeState, lexeme_id)
+    previous_state = ks.state if ks else None
+    if ks and ks.source == "derived" and ks.state == "familiar":
+        session.delete(ks)
+    session.add(Event(type="lexeme_stats_reset", lexeme_id=lexeme_id,
+                      data={"previous": previous, "previous_state": previous_state,
+                            "policy": "evidence-v1", "retrieval_retained": True}))
     session.commit()
     return {"lexeme_id": lexeme_id, "reset": stats is not None}

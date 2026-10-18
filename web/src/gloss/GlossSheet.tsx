@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { get } from "../api/client";
 import type { KnowledgeStateName, LexemeInfo, SentenceOut, Word } from "../api/types";
@@ -22,7 +23,7 @@ interface Props {
   savedLexemes: Set<number>;
   onClose: () => void;
   onResume: () => void;
-  onSaveWord: (lexemeId: number, surface: string, sentenceId: number) => void;
+  onSaveWord: (lexemeId: number, surface: string, sentenceId: number, selection?: { selected_reading?: string; selected_meaning?: string; occurrence_start?: number }) => void;
   onSaveSentence: (sentenceId: number) => void;
   onSetState: (lexemeId: number, state: KnowledgeStateName) => void;
 }
@@ -40,9 +41,9 @@ const NAME_NOTE: Record<string, string> = {
 function localInfo(word: Word, knowledge: Record<string, KnowledgeStateName>): LexemeInfo {
   return {
     lexeme_id: word.lex ?? -1,
-    simplified: word.t,
+    simplified: word.canonical ?? word.t,
     traditional: word.tr ?? null,
-    pinyin: null,
+    pinyin: word.reading ?? null,
     hsk: null,
     is_dict: !!word.gloss,
     pos: word.ne ? NE_POS[word.ne] : null,
@@ -83,7 +84,9 @@ export default function GlossSheet({
   const initial = target.candidates ?? (target.word ? [localInfo(target.word, knowledge)] : []);
   const [candidates, setCandidates] = useState<LexemeInfo[]>(initial);
   const [pick, setPick] = useState(0);
+  const [sensePick, setSensePick] = useState<number | null>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const returnFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const pinyinStyle = usePrefs((p) => p.pinyinStyle);
 
   useEffect(() => {
@@ -94,6 +97,7 @@ export default function GlossSheet({
   useEffect(() => {
     setCandidates(initial);
     setPick(0);
+    setSensePick(null);
     const lex = target.candidates ? null : target.word?.lex;
     if (lex) {
       track("lookup", { item_id: itemId, sentence_id: target.sentence.id, lexeme_id: lex });
@@ -108,9 +112,12 @@ export default function GlossSheet({
   if (!c) return null;
   const state = (c.lexeme_id > 0 && knowledge[c.lexeme_id]) || c.state;
   const saved = c.lexeme_id > 0 && savedLexemes.has(c.lexeme_id);
+  const choices = c.senses.flatMap((sense) => sense.defs.map((meaning) => ({ py: sense.py, meaning })));
 
   return (
+    <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
     <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center p-3 sm:p-5">
+      <DialogPrimitive.Overlay asChild>
       <button
         type="button"
         className="pointer-events-auto absolute inset-0 cursor-default bg-black/20 backdrop-blur-[1px]"
@@ -118,7 +125,15 @@ export default function GlossSheet({
         aria-label="Close definition and remain paused"
         tabIndex={-1}
       />
+      </DialogPrimitive.Overlay>
       <div className="absolute bottom-0 left-1/2 h-48 w-[min(90vw,760px)] -translate-x-1/2 rounded-full bg-teal-500/8 blur-3xl" />
+      <DialogPrimitive.Content asChild aria-describedby={undefined} onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        dialogRef.current?.focus({ preventScroll: true });
+      }} onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        if (returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true });
+      }}>
       <section
         ref={dialogRef}
         role="dialog"
@@ -128,12 +143,13 @@ export default function GlossSheet({
         className="gloss-popover pointer-events-auto relative flex max-h-[min(560px,calc(100vh-1.5rem))] w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#131a17]/96 shadow-[0_24px_80px_rgba(0,0,0,.58)] backdrop-blur-2xl"
         onClick={(e) => e.stopPropagation()}
       >
+        <DialogPrimitive.Title className="sr-only">Definition for {c.simplified}</DialogPrimitive.Title>
         <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-white/10 sm:hidden" />
 
         <header className="relative shrink-0 border-b border-white/7 px-4 pb-4 pt-3 sm:px-5 sm:pt-5">
           <button
             onClick={onClose}
-            className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full text-stone-500 transition hover:bg-white/7 hover:text-stone-100 focus-visible:outline-2 focus-visible:outline-teal-400"
+            className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full text-stone-400 transition hover:bg-white/7 hover:text-stone-100 focus-visible:outline-2 focus-visible:outline-teal-400"
             aria-label="Close definition"
             title="Close (Esc)"
           >
@@ -159,30 +175,30 @@ export default function GlossSheet({
                 {freqBand(c.freq_rank) && (
                   <span title={`frequency rank #${c.freq_rank?.toLocaleString()}`} className="rounded-md border border-white/8 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-400">{freqBand(c.freq_rank)}</span>
                 )}
-                <span className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-stone-500">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-stone-400">
                   <i className={`size-1.5 rounded-full ${stateDot[state]}`} />
                   {stateLabel[state]}
                 </span>
               </div>
               {c.stats ? (
-                <p className="mt-2 text-[11px] text-stone-600">
+                <p className="mt-2 text-[11px] text-stone-400">
                   Encountered <span className="text-stone-400">{c.stats.encounters}×</span>
                   <span className="mx-1.5 text-stone-700">·</span>
                   Looked up <span className="text-stone-400">{c.stats.lookups}×</span>
                 </p>
               ) : (
-                <p className="mt-2 text-[11px] text-stone-600">Tap words while watching to build learning history.</p>
+                <p className="mt-2 text-[11px] text-stone-400">Tap words while watching to build learning history.</p>
               )}
             </div>
           </div>
 
           {candidates.length > 1 && (
             <div className="mt-3 flex items-center gap-1.5 overflow-x-auto pl-[4.5rem] sm:pl-20">
-              <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-stone-600">Matches</span>
+              <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-stone-400">Matches</span>
               {candidates.map((candidate, i) => (
                 <button
                   key={`${candidate.lexeme_id}-${i}`}
-                  onClick={() => setPick(i)}
+                  onClick={() => { setPick(i); setSensePick(null); }}
                   className={`shrink-0 rounded-lg border px-2.5 py-1 font-zh text-sm transition ${i === pick ? "border-teal-400/25 bg-teal-400/10 text-teal-100" : "border-white/7 bg-white/[0.025] text-stone-400 hover:bg-white/6 hover:text-stone-100"}`}
                 >
                   {candidate.simplified}
@@ -195,42 +211,46 @@ export default function GlossSheet({
         <div className="flex shrink-0 items-center gap-3 border-b border-teal-300/10 bg-teal-400/[0.055] px-4 py-2.5 text-xs text-teal-100/75 sm:px-5">
           <span className="flex min-w-0 flex-1 items-center gap-2"><PauseIcon />Playback paused for lookup</span>
           <button type="button" onClick={onResume} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-teal-400 px-3 text-[11px] font-semibold text-teal-950 transition hover:bg-teal-300">
-            <PlayIcon /> Resume <span className="hidden text-teal-900/60 sm:inline">· Space</span>
+            <PlayIcon /> Resume <span className="hidden text-teal-950 sm:inline">· Space</span>
           </button>
         </div>
 
         <div className="transcript-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          {target.word?.meaning && <p className="mb-3 text-sm text-teal-200">Your meaning in this line: {target.word.meaning}</p>}
+          <p className="mb-3 text-xs text-stone-400">Choose the dictionary entry you intend to learn. Automatic readings are estimates; dictionary tones may differ from connected speech.</p>
+          {target.word?.reading && <p className="mb-3 text-sm text-teal-200">In this sentence ({target.word.reading_source === "user" ? "selected" : "automatic"}): {formatPinyin(target.word.reading, pinyinStyle)}</p>}
           <div className="space-y-2.5">
-            {c.senses.slice(0, 6).map((sense, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-white/5 text-[10px] tabular-nums text-stone-600">{i + 1}</span>
+            {choices.map((sense, i) => (
+              <label key={i} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${sensePick === i ? "border-teal-400 bg-teal-400/10" : "border-white/10"}`}>
+                <input type="radio" name="saved-sense" aria-label={`Learn meaning ${i + 1}: ${sense.meaning}`} checked={sensePick === i} onChange={() => setSensePick(i)} className="mt-1 accent-teal-400" />
+                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-white/5 text-[10px] tabular-nums text-stone-400">{i + 1}</span>
                 <p className="min-w-0 text-[13px] leading-relaxed text-stone-200 sm:text-sm">
-                  {sense.py && sense.py !== c.pinyin && <span className="mr-2 font-medium text-teal-300/75">{formatPinyin(sense.py, pinyinStyle)}</span>}
-                  {sense.defs.join(" · ")}
+                  {sense.py && <span className="mr-2 font-medium text-teal-300/75">{formatPinyin(sense.py, pinyinStyle)}</span>}
+                  {sense.meaning}
                 </p>
-              </div>
+              </label>
             ))}
             {!c.senses.length && (!c.is_dict && c.pos && NAME_NOTE[c.pos] ? (
               <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center">
                 <p className="text-sm text-stone-300">{NAME_NOTE[c.pos]}</p>
-                <p className="mt-1 text-xs text-stone-600">
+                <p className="mt-1 text-xs text-stone-400">
                   Proper names aren't dictionary words — the pinyin shows the standard character readings.
                 </p>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-white/8 px-4 py-5 text-center">
                 <p className="text-sm text-stone-400">No dictionary definition available.</p>
-                <p className="mt-1 text-xs text-stone-600">This may be a name or an out-of-vocabulary expression.</p>
+                <p className="mt-1 text-xs text-stone-400">This may be a name or an out-of-vocabulary expression.</p>
               </div>
             ))}
           </div>
 
           <div className="mt-4 rounded-xl border border-white/7 bg-black/15 px-3.5 py-3">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-600">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-400">
               <ContextIcon /> In this sentence
             </div>
             <p className="font-zh text-base leading-relaxed text-stone-200">{target.sentence.zh}</p>
-            {target.sentence.en && <p className="mt-1 text-xs leading-relaxed text-stone-500">{target.sentence.en}</p>}
+            {target.sentence.en && <p className="mt-1 text-xs leading-relaxed text-stone-400">{target.sentence.en}</p>}
           </div>
         </div>
 
@@ -238,11 +258,18 @@ export default function GlossSheet({
           {c.lexeme_id > 0 && (
             <>
               <button
-                onClick={() => onSaveWord(c.lexeme_id, c.simplified, target.sentence.id)}
+                onClick={() => {
+                  const sense = sensePick === null ? null : choices[sensePick];
+                  onSaveWord(c.lexeme_id, target.word?.t ?? c.simplified, target.sentence.id, {
+                    selected_reading: sense?.py ?? undefined,
+                    selected_meaning: sense?.meaning,
+                    occurrence_start: target.word?.start,
+                  });
+                }}
                 className={`gloss-action-primary ${saved ? "is-saved" : ""}`}
               >
                 <BookmarkIcon filled={saved} />
-                {saved ? "Saved · add context" : "Save word"}
+                {sensePick !== null ? "Save selected meaning" : saved ? "Saved · add context" : "Save word"}
               </button>
               <button
                 onClick={() => onSetState(c.lexeme_id, state === "known" ? "new" : "known")}
@@ -271,7 +298,9 @@ export default function GlossSheet({
           )}
         </footer>
       </section>
+      </DialogPrimitive.Content>
     </div>
+    </DialogPrimitive.Root>
   );
 }
 

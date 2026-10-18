@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { del, get, patch, post, put } from "./client";
+import { api, del, get, patch, post, put } from "./client";
 import type {
   ExportPreview,
   ItemDetail,
@@ -21,14 +21,16 @@ export const useSeries = (id: number) =>
   useQuery({ queryKey: ["series", id], queryFn: () => get<SeriesDetail>(`/series/${id}`) });
 
 export const useItem = (id: number) =>
-  useQuery({ queryKey: ["item", id], queryFn: () => get<ItemDetail>(`/items/${id}`) });
+  useQuery({ queryKey: ["item", id], queryFn: () => get<ItemDetail>(`/items/${id}`),
+    refetchInterval: (query) => query.state.data?.ready ? false : 5000 });
 
 export const useSentences = (itemId: number) =>
   useQuery({
     queryKey: ["sentences", itemId],
     queryFn: () => get<{ item_id: number; zh_offset_ms: number; sentences: SentenceOut[] }>(
       `/items/${itemId}/sentences`),
-    staleTime: Infinity, // immutable per content revision (server also ETags it)
+    staleTime: 15_000,
+    refetchInterval: 15_000, // background alignment/translation may revise the payload
   });
 
 export const useKnowledge = (itemId: number) =>
@@ -73,6 +75,9 @@ export function useSaveItem(itemId: number) {
       lexeme_id?: number;
       surface?: string;
       sentence_id?: number;
+      selected_reading?: string;
+      selected_meaning?: string;
+      occurrence_start?: number;
     }) => post<{ id: number; created: boolean }>("/saved-items", body),
     onMutate: async (body) => {
       // optimistic: the token's saved highlight should be instant, like the
@@ -94,16 +99,18 @@ export function useSaveItem(itemId: number) {
     },
     onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(["knowledge", itemId], ctx.prev),
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["sentences", itemId] });
       qc.invalidateQueries({ queryKey: ["knowledge", itemId] });
       qc.invalidateQueries({ queryKey: ["saved"] });
+      qc.invalidateQueries({ queryKey: ["mining-budget"] });
     },
   });
 }
 
-export const useSaved = (kind?: string) =>
+export const useSaved = (kind?: string, archived = false) =>
   useQuery({
-    queryKey: ["saved", kind ?? "all"],
-    queryFn: () => get<{ items: SavedItemOut[] }>(`/saved-items${kind ? `?kind=${kind}` : ""}`),
+    queryKey: ["saved", kind ?? "all", archived],
+    queryFn: () => get<{ items: SavedItemOut[] }>(`/saved-items?archived=${archived}${kind ? `&kind=${kind}` : ""}`),
   });
 
 export function useUnsave() {
@@ -139,7 +146,9 @@ export function usePatchSaved() {
   return useMutation({
     mutationFn: ({ id, ...body }: { id: number; note?: string; archived?: boolean }) =>
       patch(`/saved-items/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved"] }),
+    onSuccess: () => {
+      for (const key of [["saved"], ["review-queue"], ["dashboard"], ["knowledge"]]) void qc.invalidateQueries({ queryKey: key });
+    },
   });
 }
 
@@ -164,9 +173,10 @@ export const useReviewQueue = () =>
     queryKey: ["review-queue"],
     queryFn: () => get<{ due: number; items: import("./types").ReviewItem[] }>("/review/queue"),
     staleTime: 0,
+    refetchOnWindowFocus: false, // keep the active review session stable
   });
 
-export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string }) =>
+export const postReviewOutcome = (savedItemId: number, body: { result: "pass" | "fail"; mode?: string; request_uuid?: string; task?: string; assistance?: string; sentence_id?: number | null; source_revision?: number; context_zh?: string }) =>
   post<import("./types").ReviewOutcome>(`/review/${savedItemId}/outcome`, body);
 
 export const useRecommendations = () =>
@@ -176,10 +186,10 @@ export const useRecommendations = () =>
     staleTime: 5 * 60_000, // coverage moves slowly; don't recompute per visit
   });
 
-export const useDashboard = () =>
+export const useDashboard = (population: "library" | "encountered" = "library") =>
   useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => get<import("./types").DashboardStats>("/stats/dashboard"),
+    queryKey: ["dashboard", population],
+    queryFn: () => get<import("./types").DashboardStats>(`/stats/dashboard?population=${population}`),
   });
 
 export const useSearch = (q: string) =>
@@ -218,13 +228,13 @@ export const fetchExportPreview = (savedItemIds: number[]) =>
 
 export interface ExportEntry {
   saved_item_id: number;
-  fields: Record<string, string>;
+  source_hash: string;
+  meaning: string;
   allow_duplicate?: boolean;
   include_media?: boolean;
 }
-
-export const startExport = (entries: ExportEntry[]) =>
-  post<{ queued: boolean; job_id: number | null }>("/anki/export", { entries });
+export const startExport = (entries: ExportEntry[], profileHash: string, requestUuid: string) =>
+  post<{ queued: boolean; job_id: number; replayed?: boolean }>("/anki/export", { entries, profile_hash: profileHash, request_uuid: requestUuid });
 
 /** Poll one job to completion; resolves with the finished job. */
 export async function awaitJob(jobId: number, timeoutMs = 180_000): Promise<JobOut> {
@@ -247,21 +257,27 @@ export const clearKnowledge = (lexemeId: number) =>
 export const resetLexemeStats = (lexemeId: number) =>
   del<{ lexeme_id: number; reset: boolean }>(`/lexemes/${lexemeId}/stats`);
 
-export const explainSentence = (sentenceId: number) =>
-  post<import("./types").ExplainCore>(`/sentences/${sentenceId}/explain`);
-
-export const explainSentenceExtras = (sentenceId: number) =>
-  post<import("./types").ExplainExtras>(`/sentences/${sentenceId}/explain-extras`);
-
-/** Fire-and-forget warmup: start generating the explanation so a later
- *  Explain click lands on the cache (or joins the in-flight call). Core
- *  first, extras chained after — parallel calls share one provider token
- *  budget and finish later than back-to-back. */
-export const prefetchExplain = (sentenceId: number) => {
-  explainSentence(sentenceId)
-    .catch(() => {})
-    .finally(() => explainSentenceExtras(sentenceId).catch(() => {}));
-};
+interface ExplainOptions { signal?: AbortSignal; prefetch?: boolean }
+async function explanation<T>(sentenceId: number, endpoint: string, options: ExplainOptions = {}): Promise<T> {
+  const requestId = crypto.randomUUID();
+  let cancelled = false;
+  const cancel = () => { if (!cancelled) { cancelled = true; void api(`/ai-requests/${requestId}`, { method: "DELETE", keepalive: true }).catch(() => {}); } };
+  if (options.signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  window.addEventListener("pagehide", cancel, { once: true });
+  try {
+    return await api<T>(`/sentences/${sentenceId}/${endpoint}?request_id=${requestId}&prefetch=${!!options.prefetch}`, { method: "POST", signal: options.signal });
+  } catch (error) { cancel(); throw error; }
+  finally { options.signal?.removeEventListener("abort", cancel); window.removeEventListener("pagehide", cancel); }
+}
+export const explainSentence = (sentenceId: number, options?: ExplainOptions) =>
+  explanation<import("./types").ExplainCore>(sentenceId, "explain", options);
+export const explainSentenceExtras = (sentenceId: number, options?: ExplainOptions) =>
+  explanation<import("./types").ExplainExtras>(sentenceId, "explain-extras", options);
+export const prefetchExplain = (sentenceId: number, signal: AbortSignal) =>
+  explainSentence(sentenceId, { signal, prefetch: true }).catch(() => {});
+export interface AIPolicy { enabled: boolean; prefetch: boolean; provider_available: boolean }
+export const useAIPolicy = () => useQuery({ queryKey: ["ai-policy"], queryFn: () => get<AIPolicy>("/ai-policy") });
 
 export const patchTrackOffset = (trackId: number, offsetMs: number) =>
   patch<{ id: number; offset_ms: number }>(`/tracks/${trackId}`, { offset_ms: offsetMs });

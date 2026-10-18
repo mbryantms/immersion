@@ -1,124 +1,79 @@
-"""Passive-exposure knowledge derivation.
+"""Repeated exposure estimates familiarity; it never establishes mastery.
 
-The app's premise is acquisition through repeated comprehensible encounters,
-so absence of struggle IS evidence: a word met again and again, across many
-shows, over weeks, without ever being looked up, is a word the learner knows.
-This job reads the counters the event stream already maintains (LexemeStats +
-lookup events) and promotes:
-
-  new      -> familiar   (moderate evidence)
-  familiar -> known      (deep evidence)
-
-Rules (all conditions must hold; thresholds deliberately conservative because
-false positives are cheap — any lookup instantly demotes back to learning,
-see api/events.py):
-
-  familiar: >=12 encounters, >=3 distinct items, first->last seen span >=14d,
-            no lookup in the last 30 days
-  known:    >=25 encounters, >=5 distinct items, span >=30d,
-            no lookup in the last 60 days
-
-Never touches manual or anki states (stronger evidence), never demotes, and
-skips lexemes with an active word save — those are the review funnel's
-business until they graduate. Runs nightly from the worker loop; idempotent.
+Only source/day-deduplicated encounters from the evidence policy count.
+Legacy playback counters remain visible but cannot silently promote words.
+Lookups are exploration, not automatic evidence of failure.
 """
-
-from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .models import Event, KnowledgeState, Lexeme, LexemeStats, SavedItem
+from .models import Event, KnowledgeState, Lexeme, LexemeExposure, SavedItem
 
-FAMILIAR = {"encounters": 12, "items": 3, "span_days": 14, "quiet_days": 30}
-KNOWN = {"encounters": 25, "items": 5, "span_days": 30, "quiet_days": 60}
-
-_RANK = {"new": 0, "familiar": 1, "known": 2}
-
-
-def _aware(ts: datetime | None) -> datetime | None:
-    if ts is None:
-        return None
-    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-
-
-def _meets(stats: LexemeStats, rule: dict, last_lookup: datetime | None, now: datetime) -> bool:
-    first, last = _aware(stats.first_seen), _aware(stats.last_seen)
-    if stats.encounters < rule["encounters"] or (stats.distinct_items or 0) < rule["items"]:
-        return False
-    if not first or not last or (last - first) < timedelta(days=rule["span_days"]):
-        return False
-    if last_lookup and (now - last_lookup) < timedelta(days=rule["quiet_days"]):
-        return False
-    return True
+FAMILIAR = {"encounters": 12, "items": 3, "span_days": 14}
 
 
 def derive_knowledge(session: Session, progress=lambda msg: None) -> dict:
-    now = datetime.now(timezone.utc)
-    last_lookup = {
-        lex_id: _aware(ts)
-        for lex_id, ts in session.execute(
-            select(Event.lexeme_id, func.max(Event.ts))
-            .where(Event.type == "lookup", Event.lexeme_id.is_not(None))
-            .group_by(Event.lexeme_id)
+    rows = session.execute(
+        select(
+            LexemeExposure.lexeme_id,
+            func.count(),
+            func.count(func.distinct(LexemeExposure.item_id)),
+            func.min(LexemeExposure.ts),
+            func.max(LexemeExposure.ts),
         )
-    }
-    active_saves = {
-        lex_id
-        for (lex_id,) in session.execute(
+        .join(Lexeme, Lexeme.id == LexemeExposure.lexeme_id)
+        .where(Lexeme.is_dict.is_(True))
+        .group_by(LexemeExposure.lexeme_id)
+        .having(func.count() >= FAMILIAR["encounters"])
+    ).all()
+    active_saves = set(
+        session.scalars(
             select(SavedItem.lexeme_id).where(
-                SavedItem.kind == "word",
-                SavedItem.archived.is_(False),
-                SavedItem.lexeme_id.is_not(None),
+                SavedItem.kind == "word", SavedItem.archived.is_(False)
             )
         )
-    }
-
-    rows = session.execute(
-        select(LexemeStats, KnowledgeState)
-        .join(Lexeme, Lexeme.id == LexemeStats.lexeme_id)
-        .join(KnowledgeState, KnowledgeState.lexeme_id == LexemeStats.lexeme_id, isouter=True)
-        .where(Lexeme.is_dict.is_(True))
-        .where(LexemeStats.encounters >= FAMILIAR["encounters"])
-    ).all()
-
+    )
     counts = {"familiar": 0, "known": 0, "checked": len(rows)}
-    for stats, ks in rows:
-        if ks is not None and ks.source in ("manual", "anki"):
-            continue  # stronger evidence owns this word
-        if ks is not None and ks.state == "ignored":
+    for lid, encounters, items, first, last in rows:
+        ks = session.get(KnowledgeState, lid)
+        if ks and (
+            ks.source != "derived" or ks.state in ("ignored", "familiar", "known")
+        ):
             continue
-        if stats.lexeme_id in active_saves:
-            continue  # the review funnel's business until graduation
-        # derived 'learning' (a lookup demotion) re-earns promotion once the
-        # quiet window passes — that's the self-correction loop working
-
-        current = ks.state if ks is not None else "new"
-        lookup_ts = last_lookup.get(stats.lexeme_id)
-        target = None
-        if _meets(stats, KNOWN, lookup_ts, now):
-            target = "known"
-        elif _meets(stats, FAMILIAR, lookup_ts, now):
-            target = "familiar"
-        if target is None or _RANK.get(target, 0) <= _RANK.get(current, 0):
-            continue  # no promotion (never demote here)
-
+        if (
+            lid in active_saves
+            or items < FAMILIAR["items"]
+            or last - first < timedelta(days=FAMILIAR["span_days"])
+        ):
+            continue
+        now = datetime.now(timezone.utc)
         if ks is None:
-            session.add(KnowledgeState(
-                lexeme_id=stats.lexeme_id, state=target, source="derived", updated_at=now,
-            ))
+            session.add(
+                KnowledgeState(
+                    lexeme_id=lid, state="familiar", source="derived", updated_at=now
+                )
+            )
         else:
-            ks.state, ks.source, ks.updated_at = target, "derived", now
-        session.add(Event(
-            type="knowledge_derived", lexeme_id=stats.lexeme_id,
-            data={"state": target, "encounters": stats.encounters,
-                  "items": stats.distinct_items,
-                  "last_lookup": lookup_ts.isoformat() if lookup_ts else None},
-        ))
-        counts[target] += 1
-
+            ks.state, ks.updated_at = "familiar", now
+        session.add(
+            Event(
+                type="knowledge_derived",
+                lexeme_id=lid,
+                data={
+                    "state": "familiar",
+                    "encounters": encounters,
+                    "items": items,
+                    "policy": "evidence-v1",
+                    "interpretation": "exposure_only",
+                },
+            )
+        )
+        counts["familiar"] += 1
     session.commit()
-    progress(f"promoted {counts['familiar']} familiar, {counts['known']} known")
+    progress(
+        f"estimated familiarity for {counts['familiar']} words; no mastery inferred"
+    )
     return counts
